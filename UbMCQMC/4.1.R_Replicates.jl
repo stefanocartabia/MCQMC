@@ -1,4 +1,4 @@
-include("2.UnMCQMC_linear.jl")
+include("3.F_k_m.jl")
 
 
 ######################################## E[F_k_m] and Var[F_k_m] #################################################
@@ -28,12 +28,12 @@ end
 #############################################       Biased       ####################################################
 
 
-function R_UbFkm(R::Int, m::Int,seq,mdl,k,f)
+function R_Fkm(R::Int, m::Int,seq,mdl,k,f)
 
     p = mdl.p
     R_Fkm = Matrix{Float64}(p,R)
     for r in R
-        R_Fkm[:,r] .= UbFkm(m,seq,mdl,k,f)
+        R_Fkm[:,r] .= Fkm(m,seq,mdl,k,f)
     end
 
     mu_pool = mean(R_Fkm; dim=2)
