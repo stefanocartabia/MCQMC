@@ -1,4 +1,4 @@
-include("../Data&Libraries/1.Libraries.jl")
+include("../Data_Libraries/1.Libraries.jl")
 
 ##################################### Bayesian Linear Regression  #############################################
 ######### Structure definition #######################################################################################
@@ -58,7 +58,7 @@ end
 
 ######## Gibbs sampler   ######################################################################################
 
-function BLR_gibbs_sampler(model::BLR_Gibbs_WCUD, seq::Matrix{Float64}, burn_in::Int, R::Int, alpha_level::Float64=0.95)
+function BLR_gibbs_sampler(model::BLR_Gibbs_WCUD, seq::Array{Float64,3}, burn_in::Int, R::Int, alpha_level::Float64=0.95)
     tot_par = model.p+1
     n_iter = size(seq)[2]
     x_t = Array{Float64}(undef, tot_par, n_iter, R)             # Betas + sigma
@@ -66,7 +66,7 @@ function BLR_gibbs_sampler(model::BLR_Gibbs_WCUD, seq::Matrix{Float64}, burn_in:
     for r in 1:R 
         x_t[:,1,r] = init_par(model)                            # Chain Initialisation 
         for t in 2:n_iter
-            x_t[:,t,r] = proposal_sample(model, x_t[:,t-1,r], seq[:,t])
+            x_t[:,t,r] = proposal_sample(model, x_t[:,t-1,r], seq[:,t,r])
         end
     end 
 

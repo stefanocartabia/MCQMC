@@ -1,0 +1,17 @@
+.\sobol.exe 4096 16 direction_numbers.txt sobol_16d.txt
+
+Powershell command: 
+o) cd "C:\Users\mussi\Documents\Manhattan\Leuven\MCQMC\Git_repos\qmc-generators\cpp"
+i) g++ -std=c++11 -O3 digitalseq_b2g.cpp -o digitalseq_b2g.exe
+ii) .\digitalseq_b2g.exe 15 12 ..\DIGSEQ\nxmats\nxs32m32.col > "C:\Users\mussi\Documents\Manhattan\Leuven\MCQMC\Data_Libraries\Pts\nx_15d_4096.csv"
+
+
+Harase's Powershell command:
+cd "C:\Users\mussi\Documents\Manhattan\Leuven\MCQMC\Data_Libraries\Pts"
+gcc -O3 "1.WCUD_Harese.c" -o WCUD_Harese.exe
+.\1.WCUD_Harese.exe 10 > tausworthe_10d.txt
+
+
+
+GIT COMANDS:
+Given the github repository: gh repo clone jointpoints/tms-nets then write in the gitshell git clone https://github.com/jointpoints/tms-nets.git
