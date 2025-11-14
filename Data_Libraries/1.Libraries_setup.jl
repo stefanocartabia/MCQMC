@@ -23,10 +23,8 @@ using LaTeXStrings
 using JLD2
 using StringEncodings
 
-using MCMCChains
-using FFTW
+using Optim
 
-# using SciMLSensitivity
-using ForwardDiff
-
+using ReverseDiff
+using Zygote
 
