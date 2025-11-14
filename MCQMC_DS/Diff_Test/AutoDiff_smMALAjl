@@ -2,7 +2,8 @@ include("C:/Users/mussi/Documents/Manhattan/Leuven/MCQMC/Data_Libraries/1.Librar
 include("C:/Users/mussi/Documents/Manhattan/Leuven/MCQMC/Data_Libraries/0.mcmc_diagnostic.jl")
 using ForwardDiff
 using SciMLSensitivity 
-using StaticArrays 
+using StaticArrays
+using Random 
 
 function simulate_system(f!::Function, u0, par, tspan::Tuple, dt)
     prob = ODEProblem(f!, u0, tspan, par)
@@ -98,8 +99,8 @@ function Tensor_Metric_sm(f!, u0, theta::AbstractVector{<:Real}, tspan, dt, d::I
 
     G = Symmetric(G + λ * I)
     chol_mat = cholesky(G)
-    L = chol_mat.U \ I(D)
-    InvFisherInfo = chol_mat \ (chol_mat' \ I(D))
+    L = chol_mat.L \ I
+    InvFisherInfo = chol_mat\I
 
     return (FisherInfo = G, InvFisherInfo = InvFisherInfo, L = L)
 end
@@ -107,7 +108,7 @@ end
 
 # Simplified Manifold MALA Kernel 
 function IS_MP_sMALA_LV(f!::Function, u0, obs, d::Integer, K::Integer, cov_mat, tspan, dt, logprior_par::Function, 
-                        init_par::AbstractVector{<:Float64}; seq::AbstractMatrix{<:Float64},
+                        init_par; seq::AbstractMatrix{<:Float64},
                         N_prop::Integer, N_iter::Integer, step_size::Float64)
 
     D = length(init_par)
@@ -137,7 +138,7 @@ function IS_MP_sMALA_LV(f!::Function, u0, obs, d::Integer, K::Integer, cov_mat, 
     # Early stopping criterion
     stall_cnt = 0 
     l_effective = 0
-    max_stall  = ceil(0.025  * N_iter)
+    max_stall  = ceil(0.1  * N_iter)
     tol_move   = 1e-4
 
     # MALA constants 
@@ -279,17 +280,20 @@ size(obs_noisy)
 #----------------------------------------------------------------------------------------------------------------#
 
 priors = (
-          Gamma(1, 3),   # alpha
-          Gamma(1, 3),   # beta 
-          Gamma(1, 3),   # delta
-          Gamma(1, 3)    # gamma
+          Gamma(2, 1),   # alpha
+          Gamma(1, 0.2),   # beta 
+          Gamma(1, 0.2),   # delta
+        #   Gamma(2, 1),   # beta
+        #   Gamma(2, 1),   # delta
+          Gamma(2, 1)    # gamma
 )
 
 logprior_par = p -> (logpdf(priors[1], p[1]) + logpdf(priors[2], p[2]) + logpdf(priors[3], p[3]) + logpdf(priors[4], p[4]))
 
-N_prop = 25 ; N_iter =  3000 
+N_prop = 25 ; N_iter =  100 
+Random.seed!(1234)
 seq = rand(N_iter*(N_prop+1), 5)
-a = [1.,1.,1.,1.]
+a = [1.8,0.5,1,2.0]
 init_par = log.(a)
 
 ############################################ Step size tuning  ################################################

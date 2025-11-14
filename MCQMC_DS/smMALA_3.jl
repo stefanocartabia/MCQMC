@@ -101,12 +101,12 @@ function Tensor_Metric(f!, u0, theta::AbstractVector{<:Real}, tspan, dt, d::Inte
         mul!(G, transpose(MJt), MJt, 1.0, 1.0)
     end
 
-    G = Symmetric(G + λ * I(D))
+    G = Symmetric(G + λ * I)
     chol_mat = cholesky(G)
-    L = chol_mat.U \ I(D)
-    InvFisherInfo = chol_mat \ (chol_mat' \ I(D))
+    L_inv = chol_mat.L \ I
+    InvFisherInfo = chol_mat \ I
 
-    return (FisherInfo = G, InvFisherInfo = InvFisherInfo, L = L)
+    return (FisherInfo = G, InvFisherInfo = InvFisherInfo, L = L_inv)
 end
 
 # smMALA 

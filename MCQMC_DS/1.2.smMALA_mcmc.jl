@@ -11,7 +11,7 @@ using SciMLSensitivity
 # ODE Solver: Tsitouras 5/4 Runge–Kutta
 function simulate_system(f!::Function, u0, par, tspan::Tuple, dt)
     prob = ODEProblem(f!, u0, tspan, par)
-    sol = solve(prob, Tsit5() ;saveat=dt, reltol=1e-6, abstol=1e-8, maxiters=10000, save_everystep=false)     
+    sol = solve(prob, Tsit5(); saveat=dt, reltol=1e-6, abstol=1e-8, maxiters=10000, save_everystep=false)     
     return Array(sol)
 end
 
@@ -60,39 +60,79 @@ end
 
 # Tensor Metric: Expected Fisher Information Matrix
 # I(θ)=E[∇θ​ℓ∇θ​ℓ⊤]=J(θ)⊤Σ−1J(θ)
-function Tensor_Metric(f!, u0, theta::AbstractVector{<:Real}, tspan, dt, d::Integer, K::Integer, save_chol_cov::Chol_Save; λ::Float64 = 1e-1)
+# function Tensor_Metric(f!, u0, theta::AbstractVector{<:Real}, tspan, dt, d::Integer, K::Integer, save_chol_cov::Chol_Save; λ::Float64 = 1e-1)
 
-    D = 4
-    chol_cov = save_chol_cov.chol_cov                               
+#     D = 4
+#     chol_cov = save_chol_cov.chol_cov                               
 
-    function sim_vec(theta::AbstractVector)
-        return vec(simulate_system(f!, u0, exp.(theta), tspan, dt))                                                       
+#     function sim_vec(theta::AbstractVector)
+#         return vec(simulate_system(f!, u0, exp.(theta), tspan, dt))                                                       
+#     end
+
+#     cfg = ForwardDiff.JacobianConfig(sim_vec, theta, ForwardDiff.Chunk{4}())
+#     J = ForwardDiff.jacobian(sim_vec, theta, cfg)                           
+
+#     G = zeros(eltype(J), D, D)
+
+#     # Jacobian 
+#     for t in 1:K
+#         r1 = (t-1)*d + 1; r2 = t*d
+#         Jt = @view J[r1:r2, :]                                              
+#         MJt = copy(Jt)                                                      
+#         MJt = chol_cov \ MJt
+#         G += transpose(Jt) * MJt                             
+#     end
+
+#     G = Symmetric(G + λ * I)
+#     chol_mat = cholesky(G)
+#     L_inv = chol_mat.L \ I
+#     InvFisherInfo = chol_mat \ I
+
+#     return (FisherInfo = G, InvFisherInfo = InvFisherInfo, L = L_inv)
+# end
+
+function Posterior_Tensor_Metric( f!, u0, theta::AbstractVector{<:Real}, tspan, dt, d::Integer, K::Integer, save_chol_cov::Chol_Save, priors; λ::Float64 = 1e-3)
+
+    D = length(theta)
+    chol_cov = save_chol_cov.chol_cov
+
+    function sim_vec(theta_local::AbstractVector)
+        return vec(simulate_system(f!, u0, exp.(theta_local), tspan, dt))
     end
 
     cfg = ForwardDiff.JacobianConfig(sim_vec, theta, ForwardDiff.Chunk{4}())
-    J = ForwardDiff.jacobian(sim_vec, theta, cfg)                           
+    J = ForwardDiff.jacobian(sim_vec, theta, cfg)   
 
     G = zeros(eltype(J), D, D)
 
-    # Jacobian 
     for t in 1:K
-        r1 = (t-1)*d + 1; r2 = t*d
-        Jt = @view J[r1:r2, :]                                              
-        MJt = copy(Jt)                                                      
-        MJt = chol_cov \ MJt
-        G += transpose(Jt) * MJt                             
+    r1 = (t-1)*d + 1; r2 = t*d
+    Jt  = @view J[r1:r2, :]     
+    Jt_L   = chol_cov.L \ Jt       
+    G  += transpose(Jt_L) * Jt_L
     end
+
+    par = exp.(theta)              
+    prior_diag = similar(par)
+
+    for i in eachindex(par)                  
+        scale = Distributions.scale(priors[i])  # Gamma(α, θscale)
+        prior_diag[i] = par[i] / scale          # -d²/dθ² log prior(e^θ)+θ
+    end
+
+    G .+= Diagonal(prior_diag)
 
     G = Symmetric(G + λ * I)
     chol_mat = cholesky(G)
-    L = chol_mat.L
-    InvFisherInfo = chol_mat \ I
+    L = chol_mat.L \ I
+    InvG  = chol_mat \ I
 
-    return (FisherInfo = G, InvFisherInfo = InvFisherInfo, L = L)
+    return (FisherInfo = G, InvFisherInfo = InvG, L = L)
 end
 
+
 # smMALA
-function rmala_lv(f!::Function, u0, obs, cov_mat, tspan, dt, logprior_par::Function, init_par; N_iter::Integer=10_000, step_size::Float64)
+function rmala_lv(f!::Function, u0, obs, cov_mat, tspan, dt, priors, logprior_par::Function, init_par; N_iter::Integer=10_000, step_size::Float64)
 
     D = length(init_par); d, K = size(obs)
     save = CholSave(cov_mat)
@@ -107,7 +147,7 @@ function rmala_lv(f!::Function, u0, obs, cov_mat, tspan, dt, logprior_par::Funct
 
     # Riemann Metric 
     # cfg_2 = ForwardDiff.JacobianConfig(sim_vec, theta_cur, ForwardDiff.Chunk{4}())
-    metric = Tensor_Metric(f!, u0, theta_cur, tspan, dt, d, K, save)
+    metric = Posterior_Tensor_Metric(f!, u0, theta_cur, tspan, dt, d, K, save, priors)
     G_cur    = metric.FisherInfo; InvG_cur = metric.InvFisherInfo; L_cur = metric.L
   
     # MALA constants 
@@ -144,7 +184,7 @@ function rmala_lv(f!::Function, u0, obs, cov_mat, tspan, dt, logprior_par::Funct
         logpost_prop = f_logpost(theta_prop)
 
         # Compute proposal metric
-        metric_p = Tensor_Metric(f!, u0, theta_prop, tspan, dt, d, K, save)
+        metric_p = Posterior_Tensor_Metric(f!, u0, theta_prop, tspan, dt, d, K, save, priors)
         G_prop = metric_p.FisherInfo; InvG_prop = metric_p.InvFisherInfo; L_prop = metric_p.L
         grad!(grad, f_logpost, theta_prop, cfg_1)
         mu_mala_prop = theta_prop .+ alpha .* (InvG_prop * grad)
@@ -198,8 +238,8 @@ function lotka_volterra!(du, u, p, t)
     du[2] = -gamma*y + delta*x*y
 end
 
-Theta_true = (1.5, 0.1, 0.075, 1.0); tspan = (0.0, 10.0); dt = 0.02; u0 = [5.0, 5.0]; 
-# Theta_true = (1.5, 0.1, 0.075, 1.0); tspan = (0.0, 1.0); dt = 0.05; u0 = [1.0, 1.0]; 
+# Theta_true = (1.5, 0.1, 0.075, 1.0); tspan = (0.0, 10.0); dt = 0.02; u0 = [5.0, 5.0]; 
+Theta_true = (1.5, 0.1, 0.075, 1.0); tspan = (0.0, 1.0); dt = 0.05; u0 = [1.0, 1.0]; 
 
 lok_volt = ODEProblem(lotka_volterra!, u0, tspan, Theta_true);
 sol = solve(lok_volt, Tsit5(), saveat=dt);   
@@ -218,23 +258,26 @@ lv_orbits = plot( p1, p2, layout = (1, 2), size = (700, 350), bottom_margin=5mm,
 
 priors = (
           Gamma(2, 1),   # alpha
-          Gamma(2, 1),   # beta 
-          Gamma(2, 1),   # delta
+          Gamma(1, 0.2),   # beta 
+          Gamma(1, 0.2),   # delta
+        #   Gamma(2, 1),   # beta
+        #   Gamma(2, 1),   # delta
           Gamma(2, 1)    # gamma
 )
 
 logprior_par = p -> (logpdf(priors[1], p[1]) + logpdf(priors[2], p[2]) + logpdf(priors[3], p[3]) + logpdf(priors[4], p[4]))
 
 N_iter = 2000; 
-a = [ 1.,  1.,  1.,  1.]
+a = (1.,  1.,  1.,  1.)
 init_par = log.(a)
 
 println("Running sm-MALA MCMC...")
-mcqmc_time = @elapsed out = rmala_lv(lotka_volterra!, u0, obs_noisy, sigma_eta, tspan, dt, logprior_par, init_par, N_iter=N_iter, step_size= 0.2);
+Random.seed!(1234);
+mcqmc_time = @elapsed out = rmala_lv(lotka_volterra!, u0, obs_noisy, sigma_eta, tspan, dt, priors, logprior_par, init_par, N_iter=N_iter, step_size= 0.05);
 println("Execution time: $(mcqmc_time) sec")
 
 
-mean(out.chain_par[500:end, :], dims=1)
+mean(out.chain_par[N_iter÷2:end, :], dims=1)
 out.grad_record
 out.acc_rate
 # ------------------------------------------------------------------------------------------------------------------#
@@ -319,10 +362,23 @@ xlabel!("Time")
 function f_sse(p)
     sse = 0.0; resid = zeros(size(obs_noisy, 1)); 
     lv_end = ODEProblem(lotka_volterra!, u0, tspan, p);
-    sol = solve(lv_end, Tsit5(), saveat=dt);
+    sol = solve(lv_end, Tsit5(); saveat=dt, reltol=1e-6, abstol=1e-8, maxiters=10000, save_everystep=false)
+    
+    # Check if solver succeeded
+    if !SciMLBase.successful_retcode(sol.retcode)
+        return Inf
+    end
+    
+    sol_array = Array(sol)
+    
+    # Check if solution has correct dimensions
+    if size(sol_array, 2) != size(obs_noisy, 2)
+        return Inf
+    end
+    
     F = cholesky(Symmetric(sigma_eta))
     for t in 1:size(obs_noisy, 2)
-        @views resid .= obs_noisy[:, t] .- sol[:, t]
+        @views resid .= obs_noisy[:, t] .- sol_array[:, t]
         y = F.U \ resid
         sse += dot(y, y)
     end
@@ -332,3 +388,57 @@ end
 f_sse(a)
 f_sse(exp.(out.chain_par[end,:]))
 f_sse(Theta_true)
+
+
+##-------------------------------------------------- TEST --------------------------------------------------------#
+
+n_points = 2000
+
+# Parameter ranges
+param_ranges = [
+    range(0.01, 2.5, length=n_points),  # alpha
+    range(0.001, .5, length=n_points),  # beta
+    range(0.001, .5, length=n_points),  # delta
+    range(0.01, 2.5, length=n_points)   # gamma
+]
+
+param_names = ["α (alpha)", "β (beta)", "δ (delta)", "γ (gamma)"]
+loglik_matrix = Array{Float64}(undef, n_points, 4)
+
+theta_fixed = log.(collect(Theta_true))  # Start with true parameters in log space
+
+# Compute profile likelihood for each parameter
+for param_idx in 1:4
+    for (i, param_val) in enumerate(param_ranges[param_idx])
+        theta_test = copy(theta_fixed)
+        theta_test[param_idx] = log(param_val)  
+        sim = simulate_system(lotka_volterra!, u0, exp.(theta_test), tspan, dt)
+        loglik_matrix[i, param_idx] = loglik_gaussian(obs_noisy, sim, CholSave(sigma_eta), size(obs_noisy, 1), size(obs_noisy, 2))
+    end
+end
+
+p1 = plot(param_ranges[1], loglik_matrix[:, 1], 
+    linewidth=2, xlabel=param_names[1], ylabel="Log-Likelihood", 
+    title="Profile Likelihood: α", grid=true, gridalpha=0.3, label="")
+vline!(p1, [Theta_true[1]], linestyle=:dash, color=:red, label="", linewidth=2)
+
+p2 = plot(param_ranges[2], loglik_matrix[:, 2], 
+    linewidth=2, xlabel=param_names[2], ylabel="Log-Likelihood", 
+    title="Profile Likelihood: β", grid=true, gridalpha=0.3, label="")
+vline!(p2, [Theta_true[2]], linestyle=:dash, color=:red, label="", linewidth=2)
+
+p3 = plot(param_ranges[3], loglik_matrix[:, 3], 
+    linewidth=2, xlabel=param_names[3], ylabel="Log-Likelihood", 
+    title="Profile Likelihood: δ", grid=true, gridalpha=0.3, label="")
+vline!(p3, [Theta_true[3]], linestyle=:dash, color=:red, label="", linewidth=2)
+
+p4 = plot(param_ranges[4], loglik_matrix[:, 4], 
+    linewidth=2, xlabel=param_names[4], ylabel="Log-Likelihood", 
+    title="Profile Likelihood: γ", grid=true, gridalpha=0.3, label="")
+vline!(p4, [Theta_true[4]], linestyle=:dash, color=:red, label="", linewidth=2)
+
+p_profiles = plot(p1, p2, p3, p4, layout=(2,2), size=(1000, 800), 
+    plot_title="Profile Likelihoods (other parameters fixed at true values)")
+display(p_profiles)
+
+#----------------------------------------------------------------------------------------------------------------#
