@@ -1,5 +1,3 @@
-include("C:/Users/mussi/Documents/Manhattan/Leuven/MCQMC/Data_Libraries/1.Libraries_setup.jl")
-
 
 # - Chen's Thesis, 8.2.1 Construction of Variate Matrix.
 function variate_mat(seq::Vector, d::Int) 

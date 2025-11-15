@@ -25,6 +25,4 @@ using StringEncodings
 
 using Optim
 
-using ReverseDiff
-using Zygote
 
