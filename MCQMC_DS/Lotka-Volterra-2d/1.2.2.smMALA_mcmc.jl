@@ -58,39 +58,7 @@ function grad!(grad::AbstractVector{Float64}, log_post::Function, x::AbstractVec
     return grad
 end
 
-# Tensor Metric: Expected Fisher Information Matrix
-# I(θ)=E[∇θ​ℓ∇θ​ℓ⊤]=J(θ)⊤Σ−1J(θ)
-# function Tensor_Metric(f!, u0, theta::AbstractVector{<:Real}, tspan, dt, d::Integer, K::Integer, save_chol_cov::Chol_Save; λ::Float64 = 1e-1)
-
-#     D = 4
-#     chol_cov = save_chol_cov.chol_cov                               
-
-#     function sim_vec(theta::AbstractVector)
-#         return vec(simulate_system(f!, u0, exp.(theta), tspan, dt))                                                       
-#     end
-
-#     cfg = ForwardDiff.JacobianConfig(sim_vec, theta, ForwardDiff.Chunk{4}())
-#     J = ForwardDiff.jacobian(sim_vec, theta, cfg)                           
-
-#     G = zeros(eltype(J), D, D)
-
-#     # Jacobian 
-#     for t in 1:K
-#         r1 = (t-1)*d + 1; r2 = t*d
-#         Jt = @view J[r1:r2, :]                                              
-#         MJt = copy(Jt)                                                      
-#         MJt = chol_cov \ MJt
-#         G += transpose(Jt) * MJt                             
-#     end
-
-#     G = Symmetric(G + λ * I)
-#     chol_mat = cholesky(G)
-#     L_inv = chol_mat.L \ I
-#     InvFisherInfo = chol_mat \ I
-
-#     return (FisherInfo = G, InvFisherInfo = InvFisherInfo, L = L_inv)
-# end
-
+# Riemann Metric Tensor: Fisher Information + Prior Hessian
 function Posterior_Tensor_Metric( f!, u0, theta::AbstractVector{<:Real}, tspan, dt, d::Integer, K::Integer, save_chol_cov::Chol_Save, priors; λ::Float64 = 1e-6)
 
     D = length(theta)
@@ -100,7 +68,7 @@ function Posterior_Tensor_Metric( f!, u0, theta::AbstractVector{<:Real}, tspan, 
         return vec(simulate_system(f!, u0, exp.(theta_local), tspan, dt))
     end
 
-    cfg = ForwardDiff.JacobianConfig(sim_vec, theta, ForwardDiff.Chunk{4}())
+    cfg = ForwardDiff.JacobianConfig(sim_vec, theta, ForwardDiff.Chunk{2}())
     J = ForwardDiff.jacobian(sim_vec, theta, cfg)   
 
     G = zeros(eltype(J), D, D)
@@ -130,7 +98,6 @@ function Posterior_Tensor_Metric( f!, u0, theta::AbstractVector{<:Real}, tspan, 
     return (FisherInfo = G, InvFisherInfo = InvG, L = L)
 end
 
-
 # smMALA
 function rmala_lv(f!::Function, u0, obs, cov_mat, tspan, dt, priors, logprior_par::Function, init_par; N_iter::Integer=10_000, step_size::Float64)
 
@@ -143,7 +110,7 @@ function rmala_lv(f!::Function, u0, obs, cov_mat, tspan, dt, priors, logprior_pa
     # Inital Conditions
     theta_cur = collect(init_par)
     logpost_cur = f_logpost(theta_cur)
-    cfg_1 = ForwardDiff.GradientConfig(f_logpost, theta_cur, ForwardDiff.Chunk{4}())
+    cfg_1 = ForwardDiff.GradientConfig(f_logpost, theta_cur, ForwardDiff.Chunk{D}())
 
     # Riemann Metric 
     # cfg_2 = ForwardDiff.JacobianConfig(sim_vec, theta_cur, ForwardDiff.Chunk{4}())
@@ -232,13 +199,13 @@ end
 ######################################################################################################################################################
 
 function lotka_volterra!(du, u, p, t)
-    alpha, beta, delta, gamma = p
+    alpha, gamma = p
     x, y = u
-    du[1] = alpha*x - beta*x*y
-    du[2] = -gamma*y + delta*x*y
+    du[1] = alpha*x - 0.1*x*y
+    du[2] = -gamma*y + 0.075*x*y
 end
 
- Theta_true = (1.5, 0.1, 0.075, 1.0); tspan = (0.0, 8.0); dt = 0.1; u0 = [5.0, 5.0]; 
+ Theta_true = (1.5, 1.0); tspan = (0.0, 8.0); dt = 0.1; u0 = [5.0, 5.0]; 
 # Theta_true = (1.5, 0.1, 0.075, 1.0); tspan = (0.0, 1.0); dt = 0.05; u0 = [1.0, 1.0]; 
 
 lok_volt = ODEProblem(lotka_volterra!, u0, tspan, Theta_true);
@@ -268,31 +235,25 @@ xlabel!("Time")
 
 priors = (
           Gamma(2, 1),   # alpha
-          Gamma(1, 0.2),   # beta 
-          Gamma(1, 0.2),   # delta
-        #   Gamma(2, 1),   # beta
-        #   Gamma(2, 1),   # delta
           Gamma(2, 1)    # gamma
 )
 
-logprior_par = p -> (logpdf(priors[1], p[1]) + logpdf(priors[2], p[2]) + logpdf(priors[3], p[3]) + logpdf(priors[4], p[4]))
-
+logprior_par = p -> (logpdf(priors[1], p[1]) + logpdf(priors[2], p[2]))
 N_iter = 2000; 
-a = (1.,  1.,  1.,  1.)
-init_par = log.(a)
+a = (2.,  2.); init_par = log.(a)
 
 println("Running sm-MALA MCMC...")
 Random.seed!(1234);
-mcqmc_time = @elapsed out = rmala_lv(lotka_volterra!, u0, obs_noisy, sigma_eta, tspan, dt, priors, logprior_par, init_par, N_iter=N_iter, step_size= 0.05);
+mcqmc_time = @elapsed out = rmala_lv(lotka_volterra!, u0, obs_noisy, sigma_eta, tspan, dt, priors, logprior_par, init_par, N_iter=N_iter, step_size= 0.35);
 println("Execution time: $(mcqmc_time) sec")
 
 
-mean(out.chain_par[N_iter÷2:end, :], dims=1)
+par_est =  mean(out.chain_par[N_iter÷2:end, :], dims=1)
 out.grad_record
 out.acc_rate
 # ------------------------------------------------------------------------------------------------------------------#
 
-for i in 1:4
+for i in 1:2
     println("ESS $(i): Parameters = ", ess_ips(out.chain_par[:, i]))
 end
 
@@ -301,19 +262,11 @@ end
 chain = out.chain_par
 iters = 1:size(chain, 1)
 
-# Create trace plots
-gr()
 p1 = plot(iters, chain[:, 1], label="α", title="Trace of α", xlabel="Iteration", ylabel="Value")
 hline!(p1, [Theta_true[1]], linestyle=:dash, color=:red)
 p2 = plot(iters, chain[:, 2], label="β", title="Trace of β", xlabel="Iteration", ylabel="Value")
 hline!(p2, [Theta_true[2]], linestyle=:dash, color=:red)
-p3 = plot(iters, chain[:, 3], label="δ", title="Trace of δ", xlabel="Iteration", ylabel="Value")
-hline!(p3, [Theta_true[3]], linestyle=:dash, color=:red)
-p4 = plot(iters, chain[:, 4], label="γ", title="Trace of γ", xlabel="Iteration", ylabel="Value")
-hline!(p4, [Theta_true[4]], linestyle=:dash, color=:red)
-
-# Combine in a 4×1 layout
-plot(p1, p2, p3, p4, layout=(4,1), size=(900,800), legend=false)
+plot(p1, p2, layout=(2,1), size=(900,800), legend=false)
 
 
 ####--------------------------------------------------------------------------------------------####
@@ -322,28 +275,21 @@ plot(p1, p2, p3, p4, layout=(4,1), size=(900,800), legend=false)
 chain= out.grad_record
 iters = 1:size(chain, 1)
 
-# Create trace plots
-gr()
 p1 = plot(iters, chain[:, 1], label="α", title="Trace of α", xlabel="Iteration", ylabel="Value")
 hline!(p1, [Theta_true[1]], linestyle=:dash, color=:red)
 p2 = plot(iters, chain[:, 2], label="β", title="Trace of β", xlabel="Iteration", ylabel="Value")
 hline!(p2, [Theta_true[2]], linestyle=:dash, color=:red)
-p3 = plot(iters, chain[:, 3], label="δ", title="Trace of δ", xlabel="Iteration", ylabel="Value")
-hline!(p3, [Theta_true[3]], linestyle=:dash, color=:red)
-p4 = plot(iters, chain[:, 4], label="γ", title="Trace of γ", xlabel="Iteration", ylabel="Value")
-hline!(p4, [Theta_true[4]], linestyle=:dash, color=:red)
 
-# Combine in a 4×1 layout
-plot(p1, p2, p3, p4, layout=(4,1), size=(900,800), legend=false)
+plot(p1, p2, layout=(2,1), size=(900,800), legend=false)
 
 #--------------------------------------------------------------------------------------------####
 
 
-lok_volt_new = ODEProblem(lotka_volterra!, u0, tspan, tuple(exp.(out.chain_par[end,:])...))
+lok_volt_new = ODEProblem(lotka_volterra!, u0, tspan, tuple(par_est...))
 sol_new = solve(lok_volt_new, Tsit5(), saveat = dt)
 
-mid_iter = max(1, div(size(out.chain_par, 1), 2))
-lok_volt_t1 = ODEProblem(lotka_volterra!, u0, tspan, tuple(exp.(out.chain_par[mid_iter,:])...))
+mid_iter = max(1, div(size(out.chain_theta, 1), 2))
+lok_volt_t1 = ODEProblem(lotka_volterra!, u0, tspan, tuple(exp.(out.chain_theta[mid_iter,:])...))
 sol_new_t1 = solve(lok_volt_t1, Tsit5(), saveat = dt)
 
 lok_volt_initial = ODEProblem(lotka_volterra!, u0, tspan, tuple(a...))
@@ -357,14 +303,14 @@ plot!(p_overlay, sol_new[1, :], sol_new[2, :], linewidth = 1.5, color = "green",
 
 ####--------------------------------------------------------------------------------------------####
 
-lv_orbits_sm = plot(sol.t, obs_noisy[1,:], lw=2, label="x true",
-    grid=true, gridalpha=0.3, legendfontsize=9,
-    legend=:outertop, legendcolumns=2, legendborder=false,
-    legend_foreground_color=:transparent,
-    title="Lotka-Volterra Dynamics (sm-MALA)", fontsize=10)
-plot!(sol.t, obs_noisy[2,:], lw=2, label="y true")
-plot!(sol.t, sol_new[1,:], lw=2, ls=:solid, label="x sm-MALA", color=:blue)
-plot!(sol.t, sol_new[2,:], lw=2, ls=:solid, label="y sm-MALA", color=:red)
+lv_orbits_sm = plot(sol.t, sol[1,:], lw=2, label="x true", grid=true, gridalpha=0.3, legendfontsize=9, 
+                    legend=:outertop, legendcolumns=2, legendborder=false, legend_foreground_color=:transparent, 
+                    title="Lotka-Volterra Dynamics (sm-MALA)", fontsize=10)
+plot!(sol.t, sol[2,:], lw=2, label="y true")
+scatter!(sol.t, obs_noisy[1,:], ms=2.2, label="x noisy", alpha=0.6)
+scatter!(sol.t, obs_noisy[2,:], ms=2.2, label="y noisy", alpha=0.6)
+plot!(sol.t, sol_new[1,:], lw=2, ls=:dash, label="x sm-MALA", color=:blue)
+plot!(sol.t, sol_new[2,:], lw=2, ls=:dash, label="y sm-MALA", color=:red)
 xlabel!("Time")
 
 ####--------------------------------------------------------------------------------------------####
@@ -385,29 +331,26 @@ function f_sse(p)
 end
 
 f_sse(a)
-f_sse(exp.(out.chain_par[end,:]))
+f_sse(par_est)
 f_sse(Theta_true)
 
 
-##-------------------------------------------------- TEST --------------------------------------------------------#
+##-------------------------------------------- Marginal Likelihood ---------------------------------------------------#
 
 n_points = 2000
 
 # Parameter ranges
 param_ranges = [
     range(0.01, 2.5, length=n_points),  # alpha
-    range(0.001, .5, length=n_points),  # beta
-    range(0.001, .5, length=n_points),  # delta
     range(0.01, 2.5, length=n_points)   # gamma
 ]
 
-
-loglik_matrix = Array{Float64}(undef, n_points, 4)
+loglik_matrix = Array{Float64}(undef, n_points, 2)
 
 theta_fixed = log.(collect(Theta_true))  # Start with true parameters in log space
 
 # Compute profile likelihood for each parameter
-for param_idx in 1:4
+for param_idx in 1:2
     for (i, param_val) in enumerate(param_ranges[param_idx])
         theta_test = copy(theta_fixed)
         theta_test[param_idx] = log(param_val)  
@@ -423,28 +366,18 @@ vline!(p1, [Theta_true[1]], linestyle=:dash, color=:red, label="", linewidth=2)
 
 p2 = plot(param_ranges[2], loglik_matrix[:, 2], 
     linewidth=2, xlabel= "Sample Value", ylabel="Log-Likelihood", 
-    title="Profile Likelihood: β", grid=true, gridalpha=0.3, label="")
+    title="Profile Likelihood: γ", grid=true, gridalpha=0.3, label="")
 vline!(p2, [Theta_true[2]], linestyle=:dash, color=:red, label="", linewidth=2)
 
-p3 = plot(param_ranges[3], loglik_matrix[:, 3], 
-    linewidth=2, xlabel= "Sample Value", ylabel="Log-Likelihood", 
-    title="Profile Likelihood: δ", grid=true, gridalpha=0.3, label="")
-vline!(p3, [Theta_true[3]], linestyle=:dash, color=:red, label="", linewidth=2)
-
-p4 = plot(param_ranges[4], loglik_matrix[:, 4], 
-    linewidth=2, xlabel= "Sample Value", ylabel="Log-Likelihood", 
-    title="Profile Likelihood: γ", grid=true, gridalpha=0.3, label="")
-vline!(p4, [Theta_true[4]], linestyle=:dash, color=:red, label="", linewidth=2)
-
-p_profiles = plot(p1, p2, p3, p4, layout=(2,2), size=(1000, 800), 
-    plot_title="Profile Likelihoods (other parameters fixed at true values)")
+p_profiles = plot(p1, p2, layout=(1,2), size=(1000, 800), 
+plot_title="Profile Likelihoods (other parameters fixed at true values)")
 display(p_profiles)
 
 ##-------------------------------------------------- Marginal Posterior --------------------------------------------------------#
 
-logpost_matrix = Array{Float64}(undef, n_points, 4)
+logpost_matrix = Array{Float64}(undef, n_points, 2)
 
-for param_idx in 1:4
+for param_idx in 1:2
     for (i, param_val) in enumerate(param_ranges[param_idx])
         theta_test = copy(theta_fixed)
         theta_test[param_idx] = log(param_val)  
@@ -466,21 +399,9 @@ end
 
     pp2 = plot(param_ranges[2], logpost_matrix[:, 2], 
         linewidth=2, xlabel= "Sample Value", ylabel="Density", 
-        title="β", grid=true, gridalpha=0.3, label="")
+        title="γ", grid=true, gridalpha=0.3, label="")
     vline!(pp2, [Theta_true[2]], linestyle=:dash, color=:red, label="", linewidth=2)
 
-    pp3 = plot(param_ranges[3], logpost_matrix[:, 3], 
-        linewidth=2, xlabel= "Sample Value", ylabel="Density", 
-        title="δ", grid=true, gridalpha=0.3, label="")
-    vline!(pp3, [Theta_true[3]], linestyle=:dash, color=:red, label="", linewidth=2)
-
-    pp4 = plot(param_ranges[4], logpost_matrix[:, 4], 
-        linewidth=2, xlabel= "Sample Value", ylabel="Density", 
-        title="γ", grid=true, gridalpha=0.3, label="")
-    vline!(pp4, [Theta_true[4]], linestyle=:dash, color=:red, label="", linewidth=2)
-
-    p_posteriors = plot(pp1, pp2, pp3, pp4, layout=(2,2), size=(1000, 800), 
+    p_posteriors = plot(pp1, pp2, layout=(1,2), size=(1000, 800), 
         plot_title="Marginal Posteriors", left_margin=3mm)
     display(p_posteriors)
-
-#----------------------------------------------------------------------------------------------------------------#
