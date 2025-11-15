@@ -40,42 +40,47 @@ function CholSave(cov::AbstractMatrix{<:Real})
 end
 
 # Log-posterior and gradient 
-function build_log_posterior_and_grad(f!, u0, obs, save_chol_cov::Chol_Save, tspan, dt, logprior_par::Function, d::Integer, K::Integer)
-    
+function build_log_posterior_and_grad(f!, u0, obs, save_chol_cov::Chol_Save,
+                                      tspan, dt, logprior_par::Function,
+                                      d::Integer, K::Integer)
+
     function log_lik_adj(par)
         prob = ODEProblem(f!, u0, tspan, par)
-        sol = solve(prob, Tsit5(); saveat=dt, reltol=1e-6, abstol=1e-8, sensealg=QuadratureAdjoint(autojacvec=ReverseDiffVJP(true)))
+        sol = solve(prob, Tsit5(); saveat = dt, reltol = 1e-6, abstol = 1e-8, sensealg = QuadratureAdjoint(autojacvec = ReverseDiffVJP(true)))
+
         sim = Array(sol)
-        return loglik_gaussian(obs, sim, save_chol_cov, d, K)
+        E   = obs .- sim
+        Y   = save_chol_cov.chol_cov.L \ E
+        sse = sum(abs2, Y)
+
+        return -0.5 * (K * d * log(2π) + K * save_chol_cov.logdet + sse)
     end
-    
+
     function logpost_and_grad(theta)
         par = exp.(theta)
+
+        loglik = log_lik_adj(par)
+        logprior = logprior_par(par)
+
         _, back = Zygote.pullback(log_lik_adj, par)
         grad_lik_p = back(1.0)[1]
         grad_prior_p = ForwardDiff.gradient(logprior_par, par)
-        grad_theta = (grad_lik_p .+ grad_prior_p) .* par .+ one(eltype(par))
-        logpost = log_lik_adj(par) + logprior_par(par) + sum(theta)
-        
+
+        grad_theta = (grad_lik_p .+ grad_prior_p) .* par .+ ones(eltype(par), length(par))
+
+        logpost = loglik + logprior + sum(theta)
+
         return logpost, grad_theta
     end
-    
+
     return logpost_and_grad
 end
 
-# Gaussian log-likelihood (Zygote-compatible version)
-function loglik_gaussian(obs::AbstractMatrix{<:Real}, sim::AbstractMatrix, chol_save::Chol_Save, d::Integer, K::Integer)
-    d, K = size(obs)
-    E = obs .- sim
-    Y = chol_save.chol_cov.L \ E
-    sse = sum(abs2, Y)
-    return -0.5 * (K*d*log(2π) + K*chol_save.logdet + sse)
-end
 
 # Riemannian Metric: Expected Fisher Information Matrix
 function Tensor_Metric(f!, u0, theta::AbstractVector{<:Real}, tspan, dt, d::Integer, K::Integer, save_chol_cov::Chol_Save; λ::Float64 = 1e-1)
     D = length(theta)
-    U = save_chol_cov.chol_cov.U
+    L = save_chol_cov.chol_cov.L
     par = collect(exp.(theta))
     
     x, sen, _ = simulate_system(f!, u0, par, tspan, dt) 
@@ -97,7 +102,7 @@ function Tensor_Metric(f!, u0, theta::AbstractVector{<:Real}, tspan, dt, d::Inte
         r1 = (t-1)*d + 1; r2 = t*d
         Jt = @view J[r1:r2, :]
         MJt = similar(Jt)
-        mul!(MJt, U, Jt)
+        mul!(MJt, L, Jt)
         mul!(G, transpose(MJt), MJt, 1.0, 1.0)
     end
 

@@ -78,8 +78,7 @@ end
 
 # Riemannian Metric: Expected Fisher Information Matrix 
 function Tensor_Metric(f!, u0, theta::AbstractVector{<:Real}, tspan, dt, d::Integer, K::Integer, save_chol_cov::Chol_Save; λ::Float64 = 1e-1)
-    D = length(theta)                       
-    U = save_chol_cov.chol_cov.U            
+    D = length(theta)                                  
 
     par = collect(exp.(theta))                
     x, sen, _ = simulate_system(f!, u0, par, tspan, dt)

@@ -1,3 +1,5 @@
+########################################      UNDER CONSTRUCTION     ################################################
+
 include("C:/Users/mussi/Documents/Manhattan/Leuven/MCQMC/Data_Libraries/1.Libraries_setup.jl")
 include("C:/Users/mussi/Documents/Manhattan/Leuven/MCQMC/Data_Libraries/0.mcmc_diagnostic.jl")
 using ForwardDiff
@@ -6,6 +8,8 @@ using SciMLSensitivity
 #####################################################################################################################
 ########################################         sm-MALA MCMC        ################################################
 ##################################  Automatic differentiation Black Box #############################################
+########################################      Lotka-Volterra 3D      ################################################
+################################     Lotka-Volterra 3D (alpha, and delta)    ########################################
 #####################################################################################################################
 
 # ODE Solver: Tsitouras 5/4 Runge–Kutta
@@ -199,13 +203,13 @@ end
 ######################################################################################################################################################
 
 function lotka_volterra!(du, u, p, t)
-    alpha, gamma = p
+    alpha, delta = p
     x, y = u
     du[1] = alpha*x - 0.1*x*y
-    du[2] = -gamma*y + 0.075*x*y
+    du[2] = -delta*y + 0.075*x*y
 end
 
- Theta_true = (1.5, 1.0); tspan = (0.0, 8.0); dt = 0.1; u0 = [5.0, 5.0]; 
+ Theta_true = (2.5, 2.5); tspan = (0.0, 8.0); dt = 0.1; u0 = [5.0, 5.0]; 
 # Theta_true = (1.5, 0.1, 0.075, 1.0); tspan = (0.0, 1.0); dt = 0.05; u0 = [1.0, 1.0]; 
 
 lok_volt = ODEProblem(lotka_volterra!, u0, tspan, Theta_true);
@@ -235,7 +239,7 @@ xlabel!("Time")
 
 priors = (
           Gamma(2, 1),   # alpha
-          Gamma(2, 1)    # gamma
+          Gamma(2, 1)    # delta
 )
 
 logprior_par = p -> (logpdf(priors[1], p[1]) + logpdf(priors[2], p[2]))
@@ -264,7 +268,7 @@ iters = 1:size(chain, 1)
 
 p1 = plot(iters, chain[:, 1], label="α", title="Trace of α", xlabel="Iteration", ylabel="Value")
 hline!(p1, [Theta_true[1]], linestyle=:dash, color=:red)
-p2 = plot(iters, chain[:, 2], label="β", title="Trace of β", xlabel="Iteration", ylabel="Value")
+p2 = plot(iters, chain[:, 2], label="δ", title="Trace of δ", xlabel="Iteration", ylabel="Value")
 hline!(p2, [Theta_true[2]], linestyle=:dash, color=:red)
 plot(p1, p2, layout=(2,1), size=(900,800), legend=false)
 
@@ -277,7 +281,7 @@ iters = 1:size(chain, 1)
 
 p1 = plot(iters, chain[:, 1], label="α", title="Trace of α", xlabel="Iteration", ylabel="Value")
 hline!(p1, [Theta_true[1]], linestyle=:dash, color=:red)
-p2 = plot(iters, chain[:, 2], label="β", title="Trace of β", xlabel="Iteration", ylabel="Value")
+p2 = plot(iters, chain[:, 2], label="δ", title="Trace of δ", xlabel="Iteration", ylabel="Value")
 hline!(p2, [Theta_true[2]], linestyle=:dash, color=:red)
 
 plot(p1, p2, layout=(2,1), size=(900,800), legend=false)
@@ -361,16 +365,16 @@ end
 
 p1 = plot(param_ranges[1], loglik_matrix[:, 1], 
     linewidth=2, xlabel= "Sample Value", ylabel="Log-Likelihood", 
-    title="Profile Likelihood: α", grid=true, gridalpha=0.3, label="")
+    title="α", grid=true, gridalpha=0.3, label="")
 vline!(p1, [Theta_true[1]], linestyle=:dash, color=:red, label="", linewidth=2)
 
 p2 = plot(param_ranges[2], loglik_matrix[:, 2], 
     linewidth=2, xlabel= "Sample Value", ylabel="Log-Likelihood", 
-    title="Profile Likelihood: γ", grid=true, gridalpha=0.3, label="")
+    title="δ", grid=true, gridalpha=0.3, label="")
 vline!(p2, [Theta_true[2]], linestyle=:dash, color=:red, label="", linewidth=2)
 
 p_profiles = plot(p1, p2, layout=(1,2), size=(1000, 800), 
-plot_title="Profile Likelihoods (other parameters fixed at true values)")
+plot_title="Profile Likelihoods")
 display(p_profiles)
 
 ##-------------------------------------------------- Marginal Posterior --------------------------------------------------------#
