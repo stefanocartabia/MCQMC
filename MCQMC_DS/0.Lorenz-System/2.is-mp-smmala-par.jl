@@ -265,23 +265,59 @@ function lorenz!(du, u, p, t)
     du[3] = x*y - β*z
 end
 
-# Simulate True Data
-tspan = (0.0, 2.0); u0 = [1.0, 1.0, 1.0]; dt = 0.01
+# Find suitable time window for inference
+tspan = (0.0, 20.0); u0 = [1.0, 1.0, 1.0]; dt = 0.1
 par_true = (10.0, 28.0, 8/3)  # σ, ρ, β
 lor_sys = ODEProblem(lorenz!, u0, tspan, par_true)
 sol = solve(lor_sys, Tsit5(), saveat=dt)   
 
+idx = findall(t -> 15.0 <= t <= 16.0, sol.t)
+t_sub = sol.t[idx]
+x_sub = sol[1, idx]
+y_sub = sol[2, idx]
+z_sub = sol[3, idx]
+
+(x_sub[1], y_sub[1], z_sub[1])
+
+#----------------------------------------------------------- Data Generation -------------------------------------------------------------------------#
+# Simulate True Data
+tspan = (15.0, 20.0); u0 = [x_sub[1], y_sub[1], z_sub[1]]; dt = 0.02
+par_true = (10.0, 28.0, 8/3)  # σ, ρ, β
+lor_sys = ODEProblem(lorenz!, u0, tspan, par_true)
+sol = solve(lor_sys, Tsit5(), saveat=dt)
+
 # Noisy Data 
-sigma_eta = 1.0 * I(3)              
-obs_noisy = Array(sol) .+ rand(MvNormal(zeros(3), sigma_eta), size(sol, 2)) 
+sigma_eta = 0.2 * I(3)              
+obs_noisy = Array(sol) .+ rand(MvNormal(zeros(3), sigma_eta), size(sol, 2));
 
 #----------------------------------------------------------- Orbits  ---------------------------------------------------------------------------------#
-p1 = plot(sol[1,:], sol[2,:], sol[3,:], linewidth = 1.5, title = "Lorenz Attractor (True)\n" * "(ρ=28, σ=10, β=8/3)", 
+p1 = plot(sol[1,:], sol[2,:], sol[3,:], linewidth = 1.5, title = "\nTrue Lorenz Attractor", 
           xlabel = "x", ylabel = "y", zlabel = "z", legend = false, grid = true, gridalpha = 0.3 )
-p2 = plot(obs_noisy[1,:], obs_noisy[2,:], obs_noisy[3,:], linewidth = 1.5, title = "Observed Lorenz Attractor", 
+p2 = plot(obs_noisy[1,:], obs_noisy[2,:], obs_noisy[3,:], linewidth = 1.5, title = "\nObserved Lorenz Attractor", 
           xlabel = "x", ylabel = "y", zlabel = "z", legend = false, color = "red", grid = true, gridalpha = 0.3)
-plot_traj = plot( p1, p2, layout = (1, 2), size = (1100, 400))
+plot_traj = plot( p1, p2, layout = (1, 2), size = (1100, 400), top_margin = 3mm)
 savefig(plot_traj, raw"C:\Users\mussi\Documents\Manhattan\Leuven\MCQMC\Plots\is-mp-smmala_ad\Lorenz-Par\MC_trajectory.png")
+
+#----------------------------------------------------------- Time Series  ---------------------------------------------------------------------------------#
+p1 = scatter(sol.t, obs_noisy[1,:], markersize=3, alpha=0.5, label="x obs", color=:lightblue,
+             grid=true, gridalpha=0.3, ylabel="x", legend=:outertop)
+plot!(p1, sol.t, sol[1,:], lw=2, label="x true", color=:blue)
+
+p2 = scatter(sol.t, obs_noisy[2,:], markersize=3, alpha=0.5, label="y obs", color=:lightcoral,
+             grid=true, gridalpha=0.3, ylabel="y", legend=:outertop)
+plot!(p2, sol.t, sol[2,:], lw=2, label="y true", color=:red)
+
+p3 = scatter(sol.t, obs_noisy[3,:], markersize=3, alpha=0.5, label="z obs", color=:lightgreen,
+             grid=true, gridalpha=0.3, ylabel="z", xlabel="Time", legend=:outertop)
+plot!(p3, sol.t, sol[3,:], lw=2, label="z true", color=:green)
+
+lorenz_ts = plot(p1, p2, p3, layout=(3,1), size=(1000, 800), 
+                plot_title="\n Lorenz System Dynamics", 
+                left_margin=5mm, bottom_margin=5mm, top_margin=5mm, legendcolumns=2,
+                legendborder=false, legend_foreground_color=:transparent)
+
+savefig(lorenz_ts, raw"C:\Users\mussi\Documents\Manhattan\Leuven\MCQMC\Plots\is-mp-smmala_ad\Lorenz-Par\MC_trajectory_ts.png")
+
 #-------------------------------------------------------------------------------------------------------------------------------------------------------#
 
 # Priors for parameters (Gamma distributions)
@@ -291,15 +327,15 @@ priors = (
           Gamma(2, 2)     # β ~ Gamma(2, 2)       
 )
 
-N_prop = 6; N_iter = 1000
+N_prop = 50 ; N_iter = 500
 Random.seed!(1234)
 wcud = rand(N_iter*(N_prop+1), 4)
-a = [8.0, 25.0, 2.5]  # Initial guess
+a = [5.0, 15.0, 5.0]  
 init_par = log.(a)
 
 ############################################################## Step size tuning  ########################################################################
 
-step_size = [0.35, 0.2, 0.1, 0.05, 0.025, 0.01]
+step_size = [0.05, 0.025, 0.01, 0.005, 0.0025, 0.001]
 pre_runs = Any[]; plots = Any[]
 
 for eps in step_size
@@ -323,15 +359,17 @@ for eps in step_size
 end
 
 ############################################################## Run IS-MP-smMALA Lorenz System ########################################################################
+
+println("\n Running IS-MP-smMALA for Lorenz System Parameter Estimation... \n")
 mcqmc_time = @elapsed out = IS_MP_sMALA_Lorenz(lorenz!, u0, obs_noisy, size(obs_noisy, 1), size(obs_noisy, 2), sigma_eta,
-                                                tspan, dt, priors, init_par, seq=wcud, N_prop=N_prop, N_iter=N_iter, step_size=0.05)
+                                                tspan, dt, priors, init_par, seq=wcud, N_prop=N_prop, N_iter=N_iter, step_size=0.60)
 
 println("Execution time: $(mcqmc_time) sec")
-exp.(out.chain)
-
+println("Chain stops after $(out.length) of $(N_iter).")
 par_est = vec(mean(exp.(out.chain)[out.length÷2:end, :], dims=1))
 
 ##-------------------------------------------------------------------------------------------------------------#
+# Weights evolution plots
 p_weights_start = bar(out.weights[1,:], legend=false, xlabel="Index", ylabel="Weights", 
                      title="Weights - Start (Iter 1)", grid=true, ylim=(0, maximum(out.weights)*1.1))
 
@@ -348,7 +386,7 @@ p_weights_evolution = plot(p_weights_start, p_weights_mid, p_weights_end, layout
 display(p_weights_evolution)
 savefig(p_weights_evolution, raw"C:\Users\mussi\Documents\Manhattan\Leuven\MCQMC\Plots\is-mp-smmala_ad\Lorenz-Par\MC_weights.png")
 #-------------------------------------------------------------------------------------------------------------# 
-
+#  Trace Plots for parameters
 chain = exp.(out.chain)
 iters = 1:size(chain, 1)
 
@@ -360,6 +398,20 @@ p3 = plot(iters, chain[:, 3], label="", title="Trace of β", xlabel="Iteration",
 hline!(p3, [par_true[3]], linestyle=:dash, color=:red)
 p = plot(p1, p2, p3, layout=(3,1), size=(900,800), legend=false)
 savefig(p, raw"C:\Users\mussi\Documents\Manhattan\Leuven\MCQMC\Plots\is-mp-smmala_ad\Lorenz-Par\MC_TracePlots.png")
+
+#-------------------------------------------------------------------------------------------------------------# 
+# #  Gradient Trace Plots for parameters
+# chain = (out.grad)
+# iters = 1:size(chain, 1)
+
+# p1 = plot(iters, chain[:, 1], label="", title="Gradient Trace of σ", xlabel="Iteration", ylabel="Value")
+# hline!(p1, [0], linestyle=:dash, color=:red)
+# p2 = plot(iters, chain[:, 2], label="", title="Gradient Trace of ρ", xlabel="Iteration", ylabel="Value")
+# hline!(p2, [0], linestyle=:dash, color=:red)
+# p3 = plot(iters, chain[:, 3], label="", title="Gradient Trace of β", xlabel="Iteration", ylabel="Value")
+# hline!(p3, [0], linestyle=:dash, color=:red)
+# p = plot(p1, p2, p3, layout=(3,1), size=(900,800), legend=false)
+# savefig(p, raw"C:\Users\mussi\Documents\Manhattan\Leuven\MCQMC\Plots\is-mp-smmala_ad\Lorenz-Par\MC_GradientTracePlots.png")
 
 ####--------------------------------------------------------------------------------------------####
 # Reconstruct trajectories with estimated parameters
@@ -374,22 +426,23 @@ plot!(p_overlay, sol_new[1, :], sol_new[2, :], sol_new[3, :], linewidth = 1.5, c
 savefig(p_overlay, raw"C:\Users\mussi\Documents\Manhattan\Leuven\MCQMC\Plots\is-mp-smmala_ad\Lorenz-Par\MC_Lorenz_Orbits.png")
 
 ####--------------------------------------------------------------------------------------------####
-# Time series plot - 3 subplots
-p1 = scatter(sol.t, obs_noisy[1,:], markersize=3, alpha=0.5, label="x obs", color=:lightblue,
-             grid=true, gridalpha=0.3, ylabel="x", legend=:topright)
-plot!(p1, sol.t, sol_new[1,:], lw=2, label="x rec", color=:blue)
+# Time series plot 
+p1 = scatter(sol.t, obs_noisy[1,:], markersize=3, alpha=0.5, label="x Observed", color=:lightblue,
+             grid=true, gridalpha=0.3, ylabel="x", legend=:outertop)
+plot!(p1, sol.t, sol_new[1,:], lw=2, label="x Reconstructed", color=:blue)
 
-p2 = scatter(sol.t, obs_noisy[2,:], markersize=3, alpha=0.5, label="y obs", color=:lightcoral,
-             grid=true, gridalpha=0.3, ylabel="y", legend=:topright)
-plot!(p2, sol.t, sol_new[2,:], lw=2, label="y rec", color=:red)
+p2 = scatter(sol.t, obs_noisy[2,:], markersize=3, alpha=0.5, label="y Observed", color=:lightcoral,
+             grid=true, gridalpha=0.3, ylabel="y", legend=:outertop)
+plot!(p2, sol.t, sol_new[2,:], lw=2, label="y Reconstructed", color=:red)
 
-p3 = scatter(sol.t, obs_noisy[3,:], markersize=3, alpha=0.5, label="z obs", color=:lightgreen,
-             grid=true, gridalpha=0.3, ylabel="z", xlabel="Time", legend=:topright)
-plot!(p3, sol.t, sol_new[3,:], lw=2, label="z rec", color=:green)
+p3 = scatter(sol.t, obs_noisy[3,:], markersize=3, alpha=0.5, label="z Observed", color=:lightgreen,
+             grid=true, gridalpha=0.3, ylabel="z", xlabel="Time", legend=:outertop)
+plot!(p3, sol.t, sol_new[3,:], lw=2, label="z Reconstructed", color=:green)
 
 lorenz_ts = plot(p1, p2, p3, layout=(3,1), size=(1000, 800), 
                 plot_title="Lorenz Dynamics (IS-MP-smMALA)", 
-                left_margin=5mm, bottom_margin=5mm, top_margin=5mm)
+                left_margin=5mm, bottom_margin=5mm, top_margin=5mm, legendcolumns=2,
+                legendborder=false, legend_foreground_color=:transparent, legend=:outertop)
 
 savefig(lorenz_ts, raw"C:\Users\mussi\Documents\Manhattan\Leuven\MCQMC\Plots\is-mp-smmala_ad\Lorenz-Par\MC_Lorenz_TimeSeries.png")
 
@@ -413,3 +466,98 @@ end
 f_sse(a)
 f_sse(par_est)
 f_sse(par_true)
+
+##-------------------------------------------- Marginal Likelihood for Lorenz Parameters ---------------------------------------------------#
+
+n_points = 2000
+
+# Parameter ranges for σ, ρ, β
+param_ranges = [
+    range(0.0, 15.0, length=n_points),   # σ
+    range(20.0, 35.0, length=n_points),  # ρ 
+    range(0, 5.0, length=n_points)     # β
+]
+
+loglik_matrix = Array{Float64}(undef, n_points, 3)
+
+theta_fixed = log.(collect(par_true))  # Start with true parameters in log space
+
+# Compute profile likelihood for each parameter
+for param_idx in 1:3
+    for (i, param_val) in enumerate(param_ranges[param_idx])
+        theta_test = copy(theta_fixed)
+        theta_test[param_idx] = log(param_val)  
+        sim = simulate_system(lorenz!, u0, exp.(theta_test), tspan, dt)
+        loglik_matrix[i, param_idx] = loglik_gaussian(obs_noisy, sim, CholSave(sigma_eta), size(obs_noisy, 1), size(obs_noisy, 2))
+    end
+end
+
+p1 = plot(param_ranges[1], loglik_matrix[:, 1], 
+    linewidth=2, xlabel= "σ", ylabel="Log-Likelihood", 
+    title="σ", grid=true, gridalpha=0.3, label="")
+vline!(p1, [par_true[1]], linestyle=:dash, color=:red, label="True", linewidth=2)
+vline!(p1, [par_est[1]], linestyle=:dashdot, color=:blue, label="Estimated", linewidth=2)
+
+p2 = plot(param_ranges[2], loglik_matrix[:, 2], 
+    linewidth=2, xlabel= "ρ", ylabel="Log-Likelihood", 
+    title="ρ", grid=true, gridalpha=0.3, label="")
+vline!(p2, [par_true[2]], linestyle=:dash, color=:red, label="True", linewidth=2)
+vline!(p2, [par_est[2]], linestyle=:dashdot, color=:blue, label="Estimated", linewidth=2)
+
+p3 = plot(param_ranges[3], loglik_matrix[:, 3], 
+    linewidth=2, xlabel= "β", ylabel="Log-Likelihood", 
+    title="β", grid=true, gridalpha=0.3, label="")
+vline!(p3, [par_true[3]], linestyle=:dash, color=:red, label="True", linewidth=2)
+vline!(p3, [par_est[3]], linestyle=:dashdot, color=:blue, label="Estimated", linewidth=2)
+
+p_profiles = plot(p1, p2, p3, layout=(1,3), size=(1500, 600), plot_title="Marginal Log-Likelihoods - Lorenz Parameters", 
+                  left_margin=6mm, bottom_margin=5mm, legend=:outertop, legendcolumns=2, legendfontsize=11, 
+                  legendborder=false, legend_foreground_color=:transparent)
+display(p_profiles)
+
+savefig(p_profiles, raw"C:\Users\mussi\Documents\Manhattan\Leuven\MCQMC\Plots\is-mp-smmala_ad\Lorenz-Par\MC_Lorenz_Marginal_Likelihoods.png")
+
+##-------------------------------------------------- Marginal Posterior for Lorenz Parameters --------------------------------------------------------#
+
+logpost_matrix = Array{Float64}(undef, n_points, 3)
+for param_idx in 1:3
+    for (i, param_val) in enumerate(param_ranges[param_idx])
+        theta_test = copy(theta_fixed)
+        theta_test[param_idx] = log(param_val)  
+        par_test = exp.(theta_test)
+        
+        sim = simulate_system(lorenz!, u0, par_test, tspan, dt)
+        loglik = loglik_gaussian(obs_noisy, sim, CholSave(sigma_eta), size(obs_noisy, 1), size(obs_noisy, 2))
+        logprior = logpdf(priors[1], par_test[1]) + logpdf(priors[2], par_test[2]) + logpdf(priors[3], par_test[3])
+        jacobian_adjustment = sum(theta_test)  
+        
+        logpost_matrix[i, param_idx] = loglik + logprior + jacobian_adjustment
+    end
+end
+
+pp1 = plot(param_ranges[1], logpost_matrix[:, 1], 
+    linewidth=2, xlabel="σ", ylabel="Log-Posterior", 
+    title="σ", grid=true, gridalpha=0.3, label="")
+vline!(pp1, [par_true[1]], linestyle=:dash, color=:red, label="True", linewidth=2)
+vline!(pp1, [par_est[1]], linestyle=:dashdot, color=:blue, label="Estimated", linewidth=2)
+
+pp2 = plot(param_ranges[2], logpost_matrix[:, 2], 
+    linewidth=2, xlabel="ρ", ylabel="Log-Posterior", 
+    title="ρ", grid=true, gridalpha=0.3, label="")
+vline!(pp2, [par_true[2]], linestyle=:dash, color=:red, label="True", linewidth=2)
+vline!(pp2, [par_est[2]], linestyle=:dashdot, color=:blue, label="Estimated", linewidth=2)
+
+pp3 = plot(param_ranges[3], logpost_matrix[:, 3], 
+    linewidth=2, xlabel="β", ylabel="Log-Posterior", 
+    title="β", grid=true, gridalpha=0.3, label="")
+vline!(pp3, [par_true[3]], linestyle=:dash, color=:red, label="True", linewidth=2)
+vline!(pp3, [par_est[3]], linestyle=:dashdot, color=:blue, label="Estimated", linewidth=2)
+
+p_posteriors = plot(pp1, pp2, pp3, layout=(1,3), size=(1500, 600), 
+    plot_title="Marginal Log-Posterior - Lorenz Parameters", left_margin=6mm, bottom_margin=5mm,
+    legend=:outertop, legendcolumns=2, legendfontsize=11, legendborder=false, legend_foreground_color=:transparent)
+display(p_posteriors)
+
+savefig(p_posteriors, raw"C:\Users\mussi\Documents\Manhattan\Leuven\MCQMC\Plots\is-mp-smmala_ad\Lorenz-Par\MC_Lorenz_Marginal_Log-Posteriors.png")
+
+
