@@ -280,10 +280,10 @@ priors = (
 #         Gamma(2, 1),    # gamma          
 )
 
-N_prop = 25 ; N_iter =  1000 
+N_prop = 5 ; N_iter =  5000
 Random.seed!(1234)
 seq = rand(N_iter*(N_prop+1), 5)
-a = [2,0.5,2,0.5]
+a = [1.,  1.,  1.,  1.]
 init_par = log.(a)
 
 ############################################ Step size tuning  ################################################
@@ -304,16 +304,17 @@ for eps in step_size
     savefig(p, fname); push!(plots, p)
 end
 plot_weight_start = plot(plots...; layout = (2, 3), size = (1200, 800), top_margin = 3mm, left_margin = 3mm, bottom_margin = 3mm, plot_title = "Step Size Tuning")
-savefig(plot_weight_start, raw"C:\Users\mussi\Documents\Manhattan\Leuven\MCQMC\Plots\is-mp-smmala_ad\tuning_eps.png")
+savefig(plot_weight_start, raw"C:\Users\mussi\Documents\Manhattan\Leuven\MCQMC\Plots\is-mp-smmala_ad\LotKa-Volterra-4d\tuning_eps.png")
 
 ########################################## Run sm-MALA IS-MCQMC ###############################################
 
+println("Running sm-MALA MCMC...")
 mcqmc_time = @elapsed out = IS_MP_sMALA_LV(lotka_volterra!, u0, obs_noisy, size(obs_noisy, 1), size(obs_noisy, 2), sigma_eta, tspan, dt, 
-                                           priors, init_par; seq=seq, N_prop=N_prop, N_iter=N_iter, step_size=0.05);
+                                           priors, init_par; seq=seq, N_prop=N_prop, N_iter=N_iter, step_size=0.01);
 
 println("Execution time: $(mcqmc_time) sec")
 exp.(out.chain)
-
+par_est =  exp.(mean(out.chain[N_iter÷2:end, :], dims=1))
 acf_log = autocor(exp.(out.chain[:, 2] ), 1:100)         
 
 ##-------------------------------------------------------------------------------------------------------------#
@@ -345,9 +346,9 @@ p3 = plot(iters, chain[:, 3], label="δ", title="Trace of δ", xlabel="Iteration
 hline!(p3, [Theta_true[3]], linestyle=:dash, color=:red)
 p4 = plot(iters, chain[:, 4], label="γ", title="Trace of γ", xlabel="Iteration", ylabel="Value")
 hline!(p4, [Theta_true[4]], linestyle=:dash, color=:red)
+p = plot(p1, p2, p3, p4, layout=(4,1), size=(900,800), legend=false, plot_title="Trace Plots (sm-MALA)", left_margin=3mm)
 
-p = plot(p1, p2, p3, p4, layout=(4,1), size=(900,800), legend=false)
-savefig(p, raw"C:\Users\mussi\Documents\Manhattan\Leuven\MCQMC\Plots\SM-MCQMC\LV_TracePlots" * string(rand_num)* ".png")
+savefig(p, raw"C:\Users\mussi\Documents\Manhattan\Leuven\MCQMC\Plots\is-mp-smmala_ad\LotKa-Volterra-4d\LV_TracePlots" * string(rand_num)* ".png")
 
 ####--------------------------------------------------------------------------------------------####
 
@@ -366,7 +367,7 @@ plot!(p_overlay, sol_initial[1, :], sol_initial[2, :], linewidth = 1.5, color = 
 plot!(p_overlay, sol_new_t1[1, :], sol_new_t1[2, :], linewidth = 1, color = "black", linestyle = :dashdot, label = "Mid-chain orbit")
 plot!(p_overlay, obs_noisy[1, :], obs_noisy[2, :], linewidth = 1.5, color = "red", label = "Observed orbit")
 plot!(p_overlay, sol_new[1, :], sol_new[2, :], linewidth = 1.5, color = "green", label = "Reconstructed orbit")
-savefig(p_overlay, raw"C:\Users\mussi\Documents\Manhattan\Leuven\MCQMC\Plots\SM-MCQMC\LV_Orbits" * string(rand_num)* ".png")
+savefig(p_overlay, raw"C:\Users\mussi\Documents\Manhattan\Leuven\MCQMC\Plots\is-mp-smmala_ad\LotKa-Volterra-4d\LV_Orbits" * string(rand_num)* ".png")
 
 ####--------------------------------------------------------------------------------------------####
 lv_orbits_sm = plot(sol.t, obs_noisy[1,:], lw=2, label="x true",
@@ -379,22 +380,28 @@ plot!(sol.t, sol_new[1,:], lw=2, ls=:solid, label="x sm-MALA", color=:blue)
 plot!(sol.t, sol_new[2,:], lw=2, ls=:solid, label="y sm-MALA", color=:red)
 xlabel!("Time")
 
-savefig(lv_orbits_sm, raw"C:\Users\mussi\Documents\Manhattan\Leuven\MCQMC\Plots\SM-MCQMC\LV_TimeSeries" * string(rand_num)* ".png")
+savefig(lv_orbits_sm, raw"C:\Users\mussi\Documents\Manhattan\Leuven\MCQMC\Plots\is-mp-smmala_ad\LotKa-Volterra-4d\LV_TimeSeries" * string(rand_num)* ".png")
 
 ####--------------------------------------------------------------------------------------------####
 
-p = exp.(out.chain[end,:])
-# p = Theta_true
-sse = 0.0; resid = zeros(size(obs_noisy, 1)); 
-lv_end = ODEProblem(lotka_volterra!, u0, tspan, p);
-sol = solve(lv_end, Tsit5(), saveat=dt);
-F = cholesky(Symmetric(sigma_eta))
-for t in 1:size(obs_noisy, 2)
-    @views resid .= obs_noisy[:, t] .- sol[:, t]
-    y = F.U \ resid
-    sse += dot(y, y)
+function f_sse(p)
+    sse = 0.0; resid = zeros(size(obs_noisy, 1)); 
+    lv_end = ODEProblem(lotka_volterra!, u0, tspan, p);
+    sol = Array(solve(lv_end, Tsit5(); saveat=dt, reltol=1e-6, abstol=1e-8, maxiters=10000, save_everystep=false))
+
+    
+    F = cholesky(Symmetric(sigma_eta))
+    for t in 1:size(obs_noisy, 2)
+        @views resid .= obs_noisy[:, t] .- sol[:, t]
+        y = F.U \ resid
+        sse += dot(y, y)
+    end
+    return sse
 end
-sse
+
+f_sse(a)
+f_sse(par_est)
+f_sse(Theta_true)
 
 
 ####--------------------------------------------------------------------------------------------####
@@ -402,6 +409,138 @@ sse
 for i in 1:4
     println("ESS $(i): Parameters = ", ess_ips(out.chain[:, i]))
 end
+
+
+
+##-------------------------------------------- Marginal Likelihood ---------------------------------------------------#
+
+n_points = 2000
+
+# Parameter ranges
+param_ranges = [
+    range(0.01, 3.5, length=n_points),  # alpha
+    range(0.01, 2., length=n_points),   # gamma
+    range(0.01, 3.5, length=n_points),  # beta
+    range(0.01, 2., length=n_points)    # delta
+]
+
+loglik_matrix = Array{Float64}(undef, n_points, 4)
+
+theta_fixed = log.(collect(Theta_true))  # Start with true parameters in log space
+
+# Compute profile likelihood for each parameter
+for param_idx in 1:4
+    for (i, param_val) in enumerate(param_ranges[param_idx])
+        theta_test = copy(theta_fixed)
+        theta_test[param_idx] = log(param_val)  
+        sim = simulate_system(lotka_volterra!, u0, exp.(theta_test), tspan, dt)
+        loglik_matrix[i, param_idx] = loglik_gaussian(obs_noisy, sim, CholSave(sigma_eta), size(obs_noisy, 1), size(obs_noisy, 2))
+    end
+end
+
+p1 = plot(param_ranges[1], loglik_matrix[:, 1], 
+    linewidth=2, xlabel= "Sample Value", ylabel="Log-Likelihood", 
+    title="α", grid=true, gridalpha=0.3, label="")
+vline!(p1, [Theta_true[1]], linestyle=:dash, color=:red, label="", linewidth=2)
+
+p2 = plot(param_ranges[2], loglik_matrix[:, 2], 
+    linewidth=2, xlabel= "Sample Value", ylabel="Log-Likelihood", 
+    title="γ", grid=true, gridalpha=0.3, label="")
+vline!(p2, [Theta_true[2]], linestyle=:dash, color=:red, label="", linewidth=2)
+
+p3 = plot(param_ranges[3], loglik_matrix[:, 3], 
+    linewidth=2, xlabel= "Sample Value", ylabel="Log-Likelihood", 
+    title="β", grid=true, gridalpha=0.3, label="")
+vline!(p3, [Theta_true[3]], linestyle=:dash, color=:red, label="", linewidth=2)
+
+p4 = plot(param_ranges[4], loglik_matrix[:, 4], 
+    linewidth=2, xlabel= "Sample Value", ylabel="Log-Likelihood", 
+    title="δ", grid=true, gridalpha=0.3, label="")
+vline!(p4, [Theta_true[4]], linestyle=:dash, color=:red, label="", linewidth=2)
+
+p_profiles = plot(p1, p3, p2, p4, layout=(2,2), size=(1300, 800),  plot_title="Marginal Likelihoods", left_margin=6mm, bottom_margin=5mm)
+display(p_profiles)
+
+savefig(p_profiles, raw"C:\Users\mussi\Documents\Manhattan\Leuven\MCQMC\Plots\is-mp-smmala_ad\LotKa-Volterra-4d\Marginal_Likelihoods.png")
+
+##-------------------------------------------------- Marginal Posterior --------------------------------------------------------#
+
+# Define log-prior function for parameter space
+logprior_par = p -> (logpdf(priors[1], p[1]) + logpdf(priors[2], p[2]) + logpdf(priors[3], p[3]) + logpdf(priors[4], p[4]))
+
+logpost_matrix = Array{Float64}(undef, n_points, 4)
+
+for param_idx in 1:4
+    for (i, param_val) in enumerate(param_ranges[param_idx])
+        theta_test = copy(theta_fixed)
+        theta_test[param_idx] = log(param_val)  
+        par_test = exp.(theta_test)
+        
+        sim = simulate_system(lotka_volterra!, u0, par_test, tspan, dt)
+        loglik = loglik_gaussian(obs_noisy, sim, CholSave(sigma_eta), size(obs_noisy, 1), size(obs_noisy, 2))
+        logprior = logprior_par(par_test)
+        jacobian_adjustment = sum(theta_test)  
+        
+        logpost_matrix[i, param_idx] = loglik + logprior + jacobian_adjustment
+    end
+end
+
+pp1 = plot(param_ranges[1], logpost_matrix[:, 1], 
+    linewidth=2, xlabel= "Sample Value", ylabel="Log-Posterior", 
+    title="α", grid=true, gridalpha=0.3, label="")
+vline!(pp1, [Theta_true[1]], linestyle=:dash, color=:red, label="", linewidth=2)
+
+pp2 = plot(param_ranges[2], logpost_matrix[:, 2], 
+    linewidth=2, xlabel= "Sample Value", ylabel="Log-Posterior", 
+    title="γ", grid=true, gridalpha=0.3, label="")
+vline!(pp2, [Theta_true[2]], linestyle=:dash, color=:red, label="", linewidth=2)
+
+pp3 = plot(param_ranges[3], logpost_matrix[:, 3], 
+    linewidth=2, xlabel= "Sample Value", ylabel="Log-Posterior", 
+    title="β", grid=true, gridalpha=0.3, label="")
+vline!(pp3, [Theta_true[3]], linestyle=:dash, color=:red, label="", linewidth=2)
+
+pp4 = plot(param_ranges[4], logpost_matrix[:, 4], 
+    linewidth=2, xlabel= "Sample Value", ylabel="Log-Posterior", 
+    title="δ", grid=true, gridalpha=0.3, label="")
+vline!(pp4, [Theta_true[4]], linestyle=:dash, color=:red, label="", linewidth=2)
+
+p_posteriors = plot(pp1, pp3, pp2, pp4, layout=(2,2), size=(1300, 800), 
+    plot_title="Marginal Posteriors", left_margin=6mm, bottom_margin=5mm)
+display(p_posteriors)
+
+    savefig(p_posteriors, raw"C:\Users\mussi\Documents\Manhattan\Leuven\MCQMC\Plots\is-mp-smmala_ad\LotKa-Volterra-4d\Marginal_Posteriors.png")
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 

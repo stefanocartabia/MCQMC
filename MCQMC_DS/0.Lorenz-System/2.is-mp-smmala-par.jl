@@ -271,7 +271,7 @@ par_true = (10.0, 28.0, 8/3)  # σ, ρ, β
 lor_sys = ODEProblem(lorenz!, u0, tspan, par_true)
 sol = solve(lor_sys, Tsit5(), saveat=dt)   
 
-idx = findall(t -> 15.0 <= t <= 16.0, sol.t)
+idx = findall(t -> 16.0 <= t <= 17.0, sol.t)
 t_sub = sol.t[idx]
 x_sub = sol[1, idx]
 y_sub = sol[2, idx]
@@ -280,8 +280,8 @@ z_sub = sol[3, idx]
 (x_sub[1], y_sub[1], z_sub[1])
 
 #----------------------------------------------------------- Data Generation -------------------------------------------------------------------------#
-# Simulate True Data
-tspan = (15.0, 20.0); u0 = [x_sub[1], y_sub[1], z_sub[1]]; dt = 0.02
+# Simulate True Data (4.197017468990827, 0.9326438278284925, 26.994261063225164)
+tspan = (16.0, 17.0); u0 = [x_sub[1], y_sub[1], z_sub[1]]; dt = 0.02
 par_true = (10.0, 28.0, 8/3)  # σ, ρ, β
 lor_sys = ODEProblem(lorenz!, u0, tspan, par_true)
 sol = solve(lor_sys, Tsit5(), saveat=dt)
@@ -327,15 +327,15 @@ priors = (
           Gamma(2, 2)     # β ~ Gamma(2, 2)       
 )
 
-N_prop = 50 ; N_iter = 500
+N_prop = 5 ; N_iter = 5000
 Random.seed!(1234)
 wcud = rand(N_iter*(N_prop+1), 4)
-a = [5.0, 15.0, 5.0]  
+a = [5.0, 20.0, 5.0]  
 init_par = log.(a)
 
 ############################################################## Step size tuning  ########################################################################
 
-step_size = [0.05, 0.025, 0.01, 0.005, 0.0025, 0.001]
+step_size = [0.6, 0.5, 0.35, 0.2, 0.1, 0.05]
 pre_runs = Any[]; plots = Any[]
 
 for eps in step_size
@@ -362,7 +362,7 @@ end
 
 println("\n Running IS-MP-smMALA for Lorenz System Parameter Estimation... \n")
 mcqmc_time = @elapsed out = IS_MP_sMALA_Lorenz(lorenz!, u0, obs_noisy, size(obs_noisy, 1), size(obs_noisy, 2), sigma_eta,
-                                                tspan, dt, priors, init_par, seq=wcud, N_prop=N_prop, N_iter=N_iter, step_size=0.60)
+                                                tspan, dt, priors, init_par, seq=wcud, N_prop=N_prop, N_iter=N_iter, step_size=0.05)
 
 println("Execution time: $(mcqmc_time) sec")
 println("Chain stops after $(out.length) of $(N_iter).")

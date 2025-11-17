@@ -40,10 +40,9 @@ function CholSave(cov::AbstractMatrix{<:Real})
 end
 
 # Log-posterior and gradient 
-function build_log_posterior_and_grad(f!, u0, obs, save_chol_cov::Chol_Save,
-                                      tspan, dt, logprior_par::Function,
-                                      d::Integer, K::Integer)
+function build_log_posterior_and_grad(f!, u0, obs, save_chol_cov::Chol_Save, tspan, dt, logprior_par::Function, d::Integer, K::Integer)
 
+    # Log-likelihood with Adjoint Sensitivity solver 
     function log_lik_adj(par)
         prob = ODEProblem(f!, u0, tspan, par)
         sol = solve(prob, Tsit5(); saveat = dt, reltol = 1e-6, abstol = 1e-8, sensealg = QuadratureAdjoint(autojacvec = ReverseDiffVJP(true)))
@@ -59,59 +58,56 @@ function build_log_posterior_and_grad(f!, u0, obs, save_chol_cov::Chol_Save,
     function logpost_and_grad(theta)
         par = exp.(theta)
 
-        loglik = log_lik_adj(par)
-        logprior = logprior_par(par)
+        loglik, grad_lik_p_tuple = Zygote.withgradient(log_lik_adj, par)
+        grad_lik_p = grad_lik_p_tuple[1]
 
-        _, back = Zygote.pullback(log_lik_adj, par)
-        grad_lik_p = back(1.0)[1]
+        logprior = logprior_par(par)
         grad_prior_p = ForwardDiff.gradient(logprior_par, par)
 
-        grad_theta = (grad_lik_p .+ grad_prior_p) .* par .+ ones(eltype(par), length(par))
-
         logpost = loglik + logprior + sum(theta)
-
+        grad_theta = (grad_lik_p .+ grad_prior_p) .* par .+ ones(eltype(par), length(par))
+        
         return logpost, grad_theta
     end
 
     return logpost_and_grad
 end
 
-
 # Riemannian Metric: Expected Fisher Information Matrix
-function Tensor_Metric(f!, u0, theta::AbstractVector{<:Real}, tspan, dt, d::Integer, K::Integer, save_chol_cov::Chol_Save; λ::Float64 = 1e-1)
-    D = length(theta)
-    L = save_chol_cov.chol_cov.L
-    par = collect(exp.(theta))
-    
-    x, sen, _ = simulate_system(f!, u0, par, tspan, dt) 
+function Tensor_Metric(f!, u0, theta, tspan, dt, d, K, save_chol_cov; λ = 1e-1)
+    D   = length(theta)
+    par = exp.(theta)
+    LΣ  = save_chol_cov.chol_cov.L
 
-    # Build Jacobian J: (d*K) x D
-    n_states, n_times = size(x)
+    x, sens_p, _ = simulate_system(f!, u0, par, tspan, dt)
     J = zeros(eltype(x), d*K, D)
+
     for j in 1:D
-        Sj = sen[:, :, j]
+        # ∂u/∂θ_j = ∂u/∂p_j * p_j
+        Sj_θ = sens_p[:, :, j] .* par[j]
         for t in 1:K
-            r1 = (t-1)*d + 1; r2 = t*d
-            J[r1:r2, j] = Sj[1:d, t]
+            r1 = (t-1)*d + 1
+            r2 = t*d
+            J[r1:r2, j] .= Sj_θ[1:d, t]
         end
     end
 
-    # Fisher information: G = Σ_t J_t' Σ^{-1} J_t
+    # Fisher
     G = zeros(eltype(J), D, D)
     for t in 1:K
-        r1 = (t-1)*d + 1; r2 = t*d
-        Jt = @view J[r1:r2, :]
-        MJt = similar(Jt)
-        mul!(MJt, L, Jt)
-        mul!(G, transpose(MJt), MJt, 1.0, 1.0)
+        r1 = (t-1)*d + 1
+        r2 = t*d
+        Jt  = @view J[r1:r2, :]
+        MJt = LΣ \ Jt
+        G .+= transpose(MJt) * MJt
     end
 
     G = Symmetric(G + λ * I)
-    chol_mat = cholesky(G)
-    L_inv = chol_mat.L \ I
-    InvFisherInfo = chol_mat \ I
+    G_chol = cholesky(G)
+    L      = G_chol.L \ I
+    InvG   = G_chol \ I
 
-    return (FisherInfo = G, InvFisherInfo = InvFisherInfo, L = L_inv)
+    return (FisherInfo = G, InvFisherInfo = InvG, L = L)
 end
 
 # smMALA 
@@ -170,8 +166,12 @@ function rmala_lv(f!::Function, u0, obs, cov_mat, tspan, dt, logprior_par::Funct
         # Accept/Rejection Rule
         # Remember the proposal is non-symmetric: 𝑞 ( 𝜃 ′ ∣ 𝜃 𝑡 ) ≠ 𝑞 ( 𝜃 𝑡 ∣ 𝜃 ′ ) 
         # logu< logπ(θ′)−logπ(θt​)​​+ logq(θt​∣θ′)−logq(θ′∣θt​)​​
+        
+        log_q_cur_given_prop = log_q(theta_cur, mu_mala_prop, G_prop)
+        log_q_prop_given_cur = log_q(theta_prop, mu_mala_cur, G_cur)
+        log_alpha = (logpost_prop - logpost_cur) + (log_q_cur_given_prop - log_q_prop_given_cur)
 
-        if log(rand()) < ((logpost_prop - logpost_cur) + (log_q(theta_cur,  mu_mala_prop, G_prop) - log_q(theta_prop, mu_mala_cur,  G_cur)))
+        if log(rand()) < log_alpha
 
             theta_cur = theta_prop
             logpost_cur = logpost_prop
@@ -207,9 +207,9 @@ function rmala_lv(f!::Function, u0, obs, cov_mat, tspan, dt, logprior_par::Funct
     )
 end
 
-
-######################################################################################################################################################
-######################################################################################################################################################
+#####################################################################################################################
+#####################################################################################################################
+#####################################################################################################################
 
 function lotka_volterra!(du, u, p, t)
     alpha, beta, delta, gamma = p
@@ -218,49 +218,57 @@ function lotka_volterra!(du, u, p, t)
     du[2] = -gamma*y + delta*x*y
 end
 
-Theta_true = (1.5, 0.1, 0.075, 1.0); tspan = (0.0, 10.0); dt = 0.02; u0 = [5.0, 5.0]; 
+Theta_true = (1.5, 0.1, 0.075, 1.0); tspan = (0.0, 10.0); dt = 0.2; u0 = [5.0, 5.0]; 
 # Theta_true = (1.5, 0.1, 0.075, 1.0); tspan = (0.0, 1.0); dt = 0.05; u0 = [1.0, 1.0]; 
 lok_volt = ODEProblem(lotka_volterra!, u0, tspan, Theta_true);
 sol = solve(lok_volt, Tsit5(), saveat=dt);   
 
 # Noisy Data 
-sigma_eta = .01 * I(2)              
-obs_noisy = Array(sol) .+ rand(MvNormal(zeros(2), sigma_eta), size(sol, 2)); 
+sigma_eta = .1 * I(2)              
+obs_noisy = Array(sol) .+ rand(MvNormal(zeros(2), sigma_eta), size(sol, 2))
+println("Using $(size(obs_noisy, 2)) observations with dt=$(dt)")
 
 #----------------------------------------------------------------------------------------------------------------#
-# p1 = plot(sol[1,:], sol[2,:], linewidth = 1.5, 
-#           xlabel = "x", ylabel = "y",
-#           legend = false, grid = true, gridalpha = 0.3, title = "True Orbit", fontsize =8)
+#  True vs Observed Orbits
+p1 = plot(sol[1,:], sol[2,:], linewidth = 1.5, 
+          xlabel = "x", ylabel = "y",
+          legend = false, grid = true, gridalpha = 0.3, title = "True Orbit", fontsize =8)
 
-# p2 = plot(obs_noisy[1,:], obs_noisy[2,:], linewidth = 1.5,
-#          xlabel = "x", ylabel = "y",
-#          legend = false, color = "red", grid = true, gridalpha = 0.3, title = "Observed Orbit", fontsize =8)
+p2 = plot(obs_noisy[1,:], obs_noisy[2,:], linewidth = 1.5,
+         xlabel = "x", ylabel = "y",
+         legend = false, color = "red", grid = true, gridalpha = 0.3, title = "Observed Orbit", fontsize =8)
 
-# lv_orbits = plot( p1, p2, layout = (1, 2), size = (700, 350), bottom_margin=5mm, top_margin=5mm)
+lv_orbits = plot( p1, p2, layout = (1, 2), size = (700, 350), bottom_margin=5mm, top_margin=5mm)
 #----------------------------------------------------------------------------------------------------------------#
 
 
 priors = (
           Gamma(2, 1),   # alpha
-          Gamma(2, 1),   # beta 
-          Gamma(2, 1),   # delta
+          Gamma(1, 0.2), # beta 
+#         Gamma(2, 1),   # beta 
+          Gamma(1, 0.2), # delta
+#         Gamma(2, 1),   # delta          
           Gamma(2, 1)    # gamma
 )
 
 logprior_par = p -> (logpdf(priors[1], p[1]) + logpdf(priors[2], p[2]) + logpdf(priors[3], p[3]) + logpdf(priors[4], p[4]))
 
 N_iter = 2_000; 
-a = [ 1.1,  1.1,  1.1,  1.1]
+a = [1.0,  0.3,  0.3,  1.5]
 init_par = log.(a)
 
 println("Running sm-MALA MCMC with Adjoint Sensitivity...")
-mcqmc_time = @elapsed out = rmala_lv(lotka_volterra!, u0, obs_noisy, sigma_eta, tspan, dt, logprior_par, init_par, N_iter=N_iter, step_size= 0.03);
+mcqmc_time = @elapsed out = rmala_lv(lotka_volterra!, u0, obs_noisy, sigma_eta, tspan, dt, logprior_par, init_par, N_iter=N_iter, step_size= 0.01);
 println("Execution time: $(mcqmc_time) sec")
+println("Acceptance rate: $(out.acc_rate)")
 
 
 out.chain_par
 out.grad_record
 out.acc_rate
+
+
+
 # ------------------------------------------------------------------------------------------------------------------#
 
 for i in 1:4
@@ -272,7 +280,6 @@ end
 chain = out.chain_par
 iters = 1:size(chain, 1)
 
-# Create trace plots
 gr()
 p1 = plot(iters, chain[:, 1], label="α", title="Trace of α", xlabel="Iteration", ylabel="Value")
 hline!(p1, [Theta_true[1]], linestyle=:dash, color=:red)
@@ -352,3 +359,5 @@ end
 f_sse(a)
 f_sse(exp.(out.chain_par[end,:]))
 f_sse(Theta_true)
+
+

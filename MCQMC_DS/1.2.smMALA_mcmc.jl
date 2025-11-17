@@ -91,9 +91,9 @@ function Posterior_Tensor_Metric( f!, u0, theta::AbstractVector{<:Real}, tspan, 
     G .+= Diagonal(prior_diag)
 
     G = Symmetric(G + λ * I)
-    chol_mat = cholesky(G)
-    L = chol_mat.L \ I
-    InvG  = chol_mat \ I
+    G_chol_mat = cholesky(G)
+    L = G_chol_mat.L \ I
+    InvG  = G_chol_mat \ I
 
     return (FisherInfo = G, InvFisherInfo = InvG, L = L)
 end

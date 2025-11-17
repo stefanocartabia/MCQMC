@@ -10,7 +10,7 @@ using Random
 #####################################################################################################################
 ########################################         IS-MP-smMALA (QMC)        ###########################################
 ############################            Automatic differentiation Black Box        ##################################
-###############################        Lotka-Volterra 3D (alpha, beta, gamma)     #####################################
+###############################        Lotka-Volterra 3D (alpha, beta, gamma)     ###################################
 #####################################################################################################################
 
 # ODE Solver: Tsitouras 5/4 Runge–Kutta
@@ -292,7 +292,29 @@ N_prop = 6 ; N_iter = 4681
 a = [2,0.5,2]
 init_par = log.(a)
 
+############################################ QMC Sequence Generation 2 #########################################
+# N_prop = 6 ; N_iter = 4681 
+
+# folder_path = raw"C:\Users\mussi\Documents\Manhattan\Leuven\MCQMC\Data_Libraries\Pts\Harase\\" 
+# vec_wcud_18 = open(folder_path * "2_18.txt", enc"UTF-16LE") do io
+#     parse.(Float64, replace.(eachline(io), "\ufeff" => ""))
+# end;
+# seq = tobias_wcud(vec_wcud_18, 4, N_prop, N_iter)
+
+# a = [2,0.5,2]
+# init_par = log.(a)
+# N_prop = 6 ; N_iter = 4681 -1 
+
+############################################ QMC Sequence Generation 3 #########################################
+folder_path = raw"C:\Users\mussi\Documents\Manhattan\Leuven\MCQMC\Data_Libraries\Pts\\" 
+sobol_tobias = CSV.read(folder_path * "sobol_tobias.txt", Tables.matrix; header=false, delim=' ', ignorerepeated=true);
+seq = sobol_tobias; N_prop = 6; N_iter = 4681
+a = [2,0.5,2]
+init_par = log.(a)
 ############################################ Step size tuning  ################################################
+output_dir = raw"C:\Users\mussi\Documents\Manhattan\Leuven\MCQMC\Plots\is-mp-smmala_ad\Lotka-Volterra\qmc"
+mkpath(output_dir)
+
 step_size = [0.35, 0.2, 0.1, 0.05, 0.025, 0.01]
 pre_runs = Any[]; plots = Any[]
 
@@ -306,11 +328,17 @@ for eps in step_size
     p = bar(pre_run.weights[1, :], legend = false, xlabel = "Index", ylabel = "Weights", title  = "Starting Weights \n ε = $(eps)",
             grid   = true, ylim   = (0, maximum(pre_run.weights) * 1.1) )
 
-    fname = raw"C:\Users\mussi\Documents\Manhattan\Leuven\MCQMC\Plots\is-mp-smmala_ad\qmc\weights_start_eps_$(replace(string(eps), "." => "_")).png"
+    eps_str = replace(string(eps), "." => "_")
+    fname = joinpath(output_dir, "weights_start_eps_$(eps_str).png")
     savefig(p, fname); push!(plots, p)
 end
 plot_weight_start = plot(plots...; layout = (2, 3), size = (1200, 800), top_margin = 3mm, left_margin = 3mm, bottom_margin = 3mm, plot_title = "Step Size Tuning")
-savefig(plot_weight_start, raw"C:\Users\mussi\Documents\Manhattan\Leuven\MCQMC\Plots\is-mp-smmala_ad\qmc\tuning_eps.png")
+savefig(plot_weight_start, joinpath(output_dir, "tuning_eps.png"))
+
+for eps in step_size
+    fname = "C:\\Users\\mussi\\Documents\\Manhattan\\Leuven\\MCQMC\\weights_start_eps_$(replace(string(eps), "." => "_")).png"
+    isfile(fname) && rm(fname)
+end
 
 ########################################## Run sm-MALA IS-MCQMC ###############################################
 
@@ -340,7 +368,7 @@ p_weights_end = bar(out.weights[end,:], legend=false, xlabel="Index", ylabel="We
 # Combine weight plots
 p_weights_evolution = plot(p_weights_start, p_weights_mid, p_weights_end, layout=(1,3), size=(1200,400))
 display(p_weights_evolution)
-savefig(p_weights_evolution, raw"C:\Users\mussi\Documents\Manhattan\Leuven\MCQMC\Plots\is-mp-smmala_ad\qmc\3d-LV_WeightsEvolution.png")
+savefig(p_weights_evolution, raw"C:\Users\mussi\Documents\Manhattan\Leuven\MCQMC\Plots\is-mp-smmala_ad\Lotka-Volterra\qmc\3d-LV_WeightsEvolution.png")
 
 #-------------------------------------------------Trace Plots---------------------------------------------------# 
 rand_num = rand(1:100) 
@@ -356,7 +384,7 @@ p3 = plot(iters, chain[:, 3], label="γ", title="Trace of γ", xlabel="Iteration
 hline!(p3, [Theta_true[3]], linestyle=:dash, color=:red)
 
 p = plot(p1, p2, p3, layout=(3,1), size=(900,800), legend=false)
-savefig(p, raw"C:\Users\mussi\Documents\Manhattan\Leuven\MCQMC\Plots\is-mp-smmala_ad\qmc\3d-LV_TracePlots" * string(rand_num)* ".png")
+savefig(p, raw"C:\Users\mussi\Documents\Manhattan\Leuven\MCQMC\Plots\is-mp-smmala_ad\Lotka-Volterra\qmc\3d-LV_TracePlots" * string(rand_num)* ".png")
 
 #----------------------------------------------- Orbits Plot------------------------------------------------------#
 
@@ -376,7 +404,7 @@ plot!(p_overlay, sol_new_t1[1, :], sol_new_t1[2, :], linewidth = 1, color = "bla
 plot!(p_overlay, obs_noisy[1, :], obs_noisy[2, :], linewidth = 1.5, color = "red", label = "Observed orbit")
 plot!(p_overlay, sol_new[1, :], sol_new[2, :], linewidth = 1.5, color = "green", label = "Reconstructed orbit")
 
-savefig(p_overlay, raw"C:\Users\mussi\Documents\Manhattan\Leuven\MCQMC\Plots\is-mp-smmala_ad\qmc\3d-LV_Orbits" * string(rand_num)* ".png")
+savefig(p_overlay, raw"C:\Users\mussi\Documents\Manhattan\Leuven\MCQMC\Plots\is-mp-smmala_ad\Lotka-Volterra\qmc\3d-LV_Orbits" * string(rand_num)* ".png")
 
 #-------------------------------------------- Time Series Plot ----------------------------------------------------#
 
@@ -392,7 +420,7 @@ plot!(sol.t, sol_new[1,:], lw=2, ls=:dash, label="x sm-MALA", color=:blue)
 plot!(sol.t, sol_new[2,:], lw=2, ls=:dash, label="y sm-MALA", color=:red)
 xlabel!("Time")
 
-savefig(lv_orbits_sm, raw"C:\Users\mussi\Documents\Manhattan\Leuven\MCQMC\Plots\is-mp-smmala_ad\qmc\3d-LV_TimeSeries" * string(rand_num)* ".png")
+savefig(lv_orbits_sm, raw"C:\Users\mussi\Documents\Manhattan\Leuven\MCQMC\Plots\is-mp-smmala_ad\Lotka-Volterra\qmc\3d-LV_TimeSeries" * string(rand_num)* ".png")
 
 ####---------------------------------------------- SSE estimates -----------------------------------------#
 
@@ -461,7 +489,7 @@ p_profiles = plot(p1, p2, p3, layout=(1,3), size=(1300, 800),  plot_title="Margi
                   legend=:outertop, legendcolumns=2, legendfontsize=11, legendborder=false, legend_foreground_color=:transparent)
 display(p_profiles)
 
-savefig(p_profiles, raw"C:\Users\mussi\Documents\Manhattan\Leuven\MCQMC\Plots\is-mp-smmala_ad\qmc\3d-Marginal_Likelihoods.png")
+savefig(p_profiles, raw"C:\Users\mussi\Documents\Manhattan\Leuven\MCQMC\Plots\is-mp-smmala_ad\Lotka-Volterra\qmc\3d-Marginal_Likelihoods.png")
 
 ##-------------------------------------------------- Marginal Posterior --------------------------------------------------------#
 
@@ -504,4 +532,4 @@ p_posteriors = plot(pp1, pp2, pp3, layout=(1,3), size=(1300, 800),
     legend=:outertop, legendcolumns=2, legendfontsize=11, legendborder=false, legend_foreground_color=:transparent)
 display(p_posteriors)
 
-savefig(p_posteriors, raw"C:\Users\mussi\Documents\Manhattan\Leuven\MCQMC\Plots\is-mp-smmala_ad\qmc\3d-Marginal_Log-Posteriors.png")
+savefig(p_posteriors, raw"C:\Users\mussi\Documents\Manhattan\Leuven\MCQMC\Plots\is-mp-smmala_ad\Lotka-Volterra\qmc\3d-Marginal_Log-Posteriors.png")

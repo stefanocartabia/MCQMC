@@ -306,6 +306,7 @@ savefig(plot_weight_start, raw"C:\Users\mussi\Documents\Manhattan\Leuven\MCQMC\P
 
 ########################################## Run sm-MALA IS-MCQMC ###############################################
 
+println("Running IS-MP-smMALA with step ...")
 mcqmc_time = @elapsed out = IS_MP_sMALA_LV(lotka_volterra!, u0, obs_noisy, size(obs_noisy, 1), size(obs_noisy, 2), sigma_eta, tspan, dt, 
                                            priors, init_par; seq=seq, N_prop=N_prop, N_iter=N_iter, step_size=0.05);
 

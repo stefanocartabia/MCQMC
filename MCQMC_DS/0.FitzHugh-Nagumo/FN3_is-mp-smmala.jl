@@ -270,8 +270,8 @@ function fhn!(du, u, p, t)
 end
 
 # Generate synthetic data
-tspan = (0.0, 20.0); u0 = [-1.0, 1]; dt = 0.1
-par_true = (0.5,0.5, 1.5)  # alpha, beta, gamma
+tspan = (0.0, 10.0); u0 = [-1.0, 1]; dt = 0.1
+par_true = (.5,.5, 1.5)  # alpha, beta, gamma
 fhn = ODEProblem(fhn!, u0, tspan, par_true)
 sol = solve(fhn, Tsit5(), saveat=dt)   
 # Noisy Data 
@@ -306,7 +306,7 @@ priors = (
           Gamma(2, 0.33)        
 )
 
-N_prop = 50 ; N_iter = 500
+N_prop = 5 ; N_iter = 1000
 Random.seed!(1234)
 wcud = rand(N_iter*(N_prop+1), 4)
 a = [1.0,1.0,1.0]  
@@ -341,11 +341,21 @@ end
 
 println("\n Running IS-MP-smMALA for FitzHugh–Nagumo System Parameter Estimation... \n")
 mcqmc_time = @elapsed out = IS_MP_sMALA(fhn!, u0, obs_noisy, size(obs_noisy, 1), size(obs_noisy, 2), sigma_eta,
-                                                tspan, dt, priors, init_par, seq=wcud, N_prop=N_prop, N_iter=N_iter, step_size=0.1)
+                                                tspan, dt, priors, init_par, seq=wcud, N_prop=N_prop, N_iter=N_iter, step_size=0.3)
 
 println("Execution time: $(mcqmc_time) sec")
 println("Chain stops after $(out.length) of $(N_iter).")
 par_est = vec(mean(exp.(out.chain)[out.length÷2:end, :], dims=1))
+
+# Convert to MCMCChains for statistics
+using MCMCChains
+chain_params = exp.(out.chain)  # Convert from log-space to parameter space
+mcmc_chain = Chains(chain_params, [:α, :β, :γ])
+display(mcmc_chain)
+
+describe(mcmc_chain) 
+
+
 
 ##-------------------------------------------------------------------------------------------------------------#
 # Weights evolution plots

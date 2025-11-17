@@ -143,5 +143,57 @@ end
 
 
 
+###################################################################################################################################################################################
+############################################################################   Algorithm 9 Tobias Schwedes   ######################################################################
+###################################################################################################################################################################################
 
+function tobias_wcud(seq::Vector{Float64},dtilde::Int, N::Int, L::Int)
 
+    P = length(seq)
+    b = dtilde + 1              # since alpha = 1
+    n_needed = L * N * b        # total number of CUD points needed
+
+    # Check if base sequence is long enough
+    if P < n_needed
+        error("Sequence length $P is too short: need at least $n_needed points.")
+    end
+
+    # Step 2: Trim to a multiple of b
+    T = (P ÷ b) * b             # T = floor(P / b) * b
+
+    if T < L * N
+        error("After trimming, base length T=$T is too small for $(L*N) blocks.")
+    end
+
+    u = seq[1:T]
+
+    # Step 3–5: generate b cyclic shifts and concatenate them
+    big = Vector{Float64}(undef, b * T)
+    k = 1
+
+    for shift in 0:(b-1)    # shift = 0,...,b-1
+        start = shift + 1   # starting index of the rotation
+
+        @inbounds begin
+            # from start to T
+            for t in start:T
+                big[k] = u[t]; k += 1
+            end
+            # from 1 to start-1
+            for t in 1:(start-1)
+                big[k] = u[t]; k += 1
+            end
+        end
+    end
+
+    # Step 6: keep only what Algorithm 13 needs
+    if n_needed > length(big)
+        error("Internal error: concatenated sequence too short.")
+    end
+
+    big = big[1:n_needed]
+
+    # Reshape into matrix (L*N) × b
+    M = reshape(big, b, L*N)'
+    return M
+end

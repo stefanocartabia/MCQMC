@@ -15,3 +15,7 @@ gcc -O3 "1.WCUD_Harese.c" -o WCUD_Harese.exe
 
 GIT COMANDS:
 Given the github repository: gh repo clone jointpoints/tms-nets then write in the gitshell git clone https://github.com/jointpoints/tms-nets.git
+
+
+Quick Link Github Repositories:
+https://github.com/stefanocartabia/MCQMC
